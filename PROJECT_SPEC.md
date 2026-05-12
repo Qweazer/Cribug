@@ -2,7 +2,7 @@
 
 ## 一、项目定位
 
-本项目第一版不是完整 Shannon，不是生产级多智能体系统，而是一个**教学型、可复刻的 AI Agent Orchestration MVP**。
+本项目第一版不是完整 Cribug，不是生产级多智能体系统，而是一个**教学型、可复刻的 AI Agent Orchestration MVP**。
 
 第一版目标：
 
