@@ -193,33 +193,31 @@
 └─────────┼────────────────┼────────────────┼────────────────────┼──────────┘
           │                │                │                    │
           ▼                ▼                ▼                    ▼
-┌─────────────────┐  ┌───────────┐  ┌─────────────────┐  ┌─────────────────┐
-│ Temporal Client │  │  Redis    │  │   PostgreSQL     │  │  Redis Stream   │
-│ (Start Workflow)│  │ (Cache)   │  │ (orchestrator DB)│  │ (task:xxx:events)│
-└────────┬────────┘  └─────┬─────┘  └────────┬────────┘  └─────────────────┘
-         │                  │                  │
-         ▼                  ▼                  ▼
+┌─────────────────┐
+│ Temporal Client │
+│ Start Workflow  │
+└────────┬────────┘
+         │ gRPC :7233
+         ▼
+┌─────────────────┐
+│ Temporal Server │
+│     (:7233)     │
+└────────┬────────┘
+         │ Task Queue
+         ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                            Temporal Worker (:7233)                            │
-│  ┌─────────────────────────────────────────────────────────────────────────┐ │
-│  │                        SimpleWorkflow                                    │ │
-│  │  Workflow 不直接 HTTP/DB/Redis，外部 IO 只在 Activity 中                  │ │
-│  │  EmitEvent(WORKFLOW_STARTED) → LoadSession → EstimatePromptTokens       │ │
-│  │  → CheckBudget → AgentActivity → RecordUsage → SaveSession              │ │
-│  │  → SaveResult → RecordExecutionCompleted → EmitEvent(TASK_COMPLETED)   │ │
-│  │  失败路径：SaveFailure → RecordExecutionFailed → EmitEvent(TASK_*)     │ │
-│  └────────────────────────────────┬────────────────────────────────────────┘ │
-│                                   │ Activities                                │
-└───────────────────────────────────┼──────────────────────────────────────────┘
-                                    │
-         ┌──────────────────────────┼──────────────────────────┐
-         │                          │                          │
-         ▼                          ▼                          ▼
+│                    Temporal Worker (no public port)                          │
+│  - connects to Temporal Server at temporal:7233                              │
+│  - polls Task Queue                                                          │
+│  - executes SimpleWorkflow and Activities                                    │
+│  - Workflow does not directly call HTTP / DB / Redis                         │
+└──────────────────────────────────────────────────────────────────────────────┘
+         │
+         ▼
 ┌─────────────────┐        ┌─────────────────┐        ┌─────────────────┐
 │ Python LLM      │        │ PostgreSQL       │        │ Redis           │
-│ Service (:8000) │        │ (写入 tasks/    │        │ (Session Cache  │
-│                 │        │  executions/     │        │  Events)        │
-│                 │        │  llm_calls)      │        │                 │
+│ Service (:8000) │        │ (orchestrator DB)│        │ (Session Cache  │
+│                 │        │                  │        │  Events)        │
 └────────┬────────┘        └─────────────────┘        └─────────────────┘
          │
          ▼
@@ -239,9 +237,12 @@
 │     Gateway: Go HTTP (net/http + chi)                         │
 │     REST API + SSE Endpoint                                  │
 ├─────────────────────────────────────────────────────────────┤
-│  2. 编排层 (:7233)                                          │
+│  2. 编排层                                                    │
+│     Temporal Server: :7233                                   │
+│     Go Worker: no public port                                │
 │     Go + Temporal SDK                                        │
-│     Worker + SimpleWorkflow + Activities                     │
+│     Worker 连接 Temporal Server 并轮询 Task Queue             │
+│     Worker 执行 SimpleWorkflow 和 Activities                 │
 │     Workflow 不直接 HTTP/DB/Redis                            │
 ├─────────────────────────────────────────────────────────────┤
 │  3. 智能层 (:8000)                                          │
@@ -1116,21 +1117,30 @@ func Load(path string) (*Config, error) {
 
 | 服务 | 端口 | 说明 |
 |------|------|------|
-| Gateway | 8080 | HTTP API |
+| Gateway | 8080 | HTTP API / SSE |
+| Temporal Server | 7233 | Temporal gRPC，Gateway 和 Worker 连接它 |
 | Temporal UI | 8088 | Temporal Web UI |
-| Temporal | 7233 | Temporal gRPC |
 | Python LLM Service | 8000 | REST API |
 | PostgreSQL | 5432 | Database |
-| Redis | 6379 | Cache/Stream |
+| Redis | 6379 | Cache / Stream |
+| Worker | 无公开端口 | 作为 Temporal Worker 进程轮询 Task Queue |
 
 ### Postgres 初始化说明
 
-**Postgres 容器启动时只会执行 `/docker-entrypoint-initdb.d` 目录下的 .sql 和 .sh 文件，但不会递归执行子目录。**
+MVP 阶段使用一个 Postgres 容器承载开发环境数据库，但需要区分两类数据：
 
-因此：
-- Temporal auto-setup 镜像会自动初始化 `temporal` 和 `temporal_visibility` database（通过其自带的 init script）
-- 业务表 `orchestrator` database 需要单独初始化
-- `migrations/001_init.sql` 放在 `orchestrator` 相关 init script 中执行
+1. Temporal persistence 数据
+   - 由 `temporalio/auto-setup` 镜像负责初始化。
+   - Temporal 使用的 database/schema 由 Temporal 镜像环境变量决定。
+   - MVP 阶段不手写 Temporal schema，不直接修改 Temporal 内部表。
+   - 如果 Temporal auto-setup 启动失败，再根据当前镜像版本显式配置 `DBNAME` / `VISIBILITY_DBNAME` 等变量。
+
+2. 业务数据
+   - 业务表只建在 `orchestrator` database。
+   - 业务表包括 `tasks`、`executions`、`llm_calls`、`session_messages`。
+   - 业务 migrations 由 `deploy/postgres-init/01-init-orchestrator.sh` 执行。
+
+Postgres 官方镜像只会执行 `/docker-entrypoint-initdb.d` 目录下的 `.sql` 和 `.sh` 文件，不会自动递归执行子目录。因此业务 schema 文件通过单独 volume 挂载到 `/migrations`，再由 init shell 脚本显式执行。
 
 **目录结构：**
 ```
@@ -1145,15 +1155,29 @@ deploy/
 #!/bin/bash
 set -e
 
-# 创建 orchestrator database（如果不存在）
+echo "[init] creating orchestrator database if not exists"
+
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<-EOSQL
-    SELECT 'CREATE DATABASE orchestrator' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'orchestrator')\gexec
+    SELECT 'CREATE DATABASE orchestrator'
+    WHERE NOT EXISTS (
+        SELECT FROM pg_database WHERE datname = 'orchestrator'
+    )\gexec
 EOSQL
 
-# 执行 migrations
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname orchestrator <<-EOSQL
-    \i /docker-entrypoint-initdb.d/migrations/001_init.sql
-EOSQL
+echo "[init] applying orchestrator schema"
+
+psql -v ON_ERROR_STOP=1 \
+    --username "$POSTGRES_USER" \
+    --dbname orchestrator \
+    -f /migrations/001_init.sql
+
+echo "[init] orchestrator database initialized"
+```
+
+**注意**：`01-init-orchestrator.sh` 需要有执行权限。使用前请执行：
+
+```bash
+chmod +x deploy/postgres-init/01-init-orchestrator.sh
 ```
 
 ### docker-compose.yaml
@@ -1163,7 +1187,9 @@ EOSQL
 version: '3.8'
 
 services:
-  # Temporal Core（auto-setup 会自动创建 temporal 和 temporal_visibility database）
+  # Temporal Core
+  # auto-setup 负责初始化 Temporal persistence schema。
+  # MVP 不手写 Temporal 内部表。
   temporal:
     image: temporalio/auto-setup:latest
     ports:
@@ -1205,6 +1231,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres-init:/docker-entrypoint-initdb.d
+      - ../migrations:/migrations
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U admin"]
       interval: 5s
@@ -1334,9 +1361,9 @@ my-orchestrator/
 ├── deploy/
 │   ├── docker-compose.yaml
 │   └── postgres-init/
-│       └── 01-init-orchestrator.sh
+│       └── 01-init-orchestrator.sh    # 需要 chmod +x
 ├── migrations/
-│   └── 001_init.sql             # 业务表结构
+│   └── 001_init.sql                   # 业务表结构，被 init script 显式加载
 ├── scripts/
 │   └── smoke_test.sh
 ├── .env.example
