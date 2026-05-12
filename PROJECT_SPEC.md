@@ -26,6 +26,7 @@
 ### 1. Gateway
 
 **职责**：
+
 - 提供 REST API
 - 接收任务
 - **唯一 task 创建方**：生成 task_id、插入 tasks(status=pending)、指定 workflow_id = "task-" + task_id
@@ -39,6 +40,7 @@
 - 提供 SSE 事件流
 
 **不做**：
+
 - 不直接调用 LLM
 - 不直接做 Agent 推理
 - 不直接执行 Workflow 逻辑
@@ -48,6 +50,7 @@
 ### 2. Go + Temporal Worker
 
 **职责**：
+
 - 注册 Workflow 和 Activity
 - 执行 SimpleWorkflow
 - Workflow **不直接** HTTP / DB / Redis 调用
@@ -65,6 +68,7 @@
 - 执行 RecordExecutionFailedActivity
 
 **不做**：
+
 - Workflow 内不直接 HTTP 调 LLM
 - Workflow 内不直接操作数据库
 - Workflow 内不直接操作 Redis
@@ -74,6 +78,7 @@
 ### 3. Python LLM Service
 
 **职责**：
+
 - 接收标准 LLMRequest
 - 调用 OpenAI-compatible provider
 - 返回 LLMResponse（含 usage、latency_ms）
@@ -81,6 +86,7 @@
 - 预留 Anthropic/Ollama 字段（第一版不实现）
 
 **不做**：
+
 - 不负责任务状态
 - 不负责 Workflow 编排
 - 不负责 session 持久化
@@ -89,6 +95,7 @@
 ### 4. PostgreSQL
 
 **职责**：
+
 - 存 tasks（业务表）
 - 存 executions（业务表）
 - 存 llm_calls（业务表）
@@ -96,6 +103,7 @@
 - 作为审计日志和查询投影
 
 **不做**：
+
 - 不替代 Temporal 保存 Workflow 状态
 - 不存短期事件缓冲
 - 不做向量检索
@@ -103,12 +111,14 @@
 ### 5. Redis
 
 **职责**：
+
 - 存 session recent messages（List，最多 50 条，TTL 7 天）**MVP 必做**
 - 存 task progress cache（Hash，TTL 1 天）
 - 存 SSE events（Stream，MAXLEN 100，TTL 1 天）
 - 存 idempotency key（可选）
 
 **不做**：
+
 - 不作为长期数据库
 - 不作为 Workflow 状态事实来源
 - 不存完整审计日志
@@ -117,12 +127,14 @@
 ### 6. SSE Event Streaming
 
 **职责**：
+
 - 让 Client 能实时看到任务执行过程
 - Gateway 提供 GET /api/v1/stream/sse?task_id=xxx
 - Workflow Activity 通过 EmitEventActivity 写 Redis Stream
 - Gateway 从 Redis Stream 读取并推送
 
 **第一版事件类型**：
+
 - TASK_CREATED（Gateway 写）
 - WORKFLOW_STARTED
 - SESSION_LOADED
@@ -136,6 +148,7 @@
 ### 7. Basic Budget Tracking
 
 **职责**：
+
 - 使用 max_total_tokens 和 max_completion_tokens
 - 调用前估算 prompt tokens（MVP 使用 ceil(len(text)/4)）
 - 若 estimated_prompt_tokens > max_total_tokens，直接标记 budget_exceeded
@@ -145,6 +158,7 @@
 - 若 actual_total_tokens > max_total_tokens，标记 budget_exceeded
 
 **不做**：
+
 - streaming token 截断
 - fallback model
 - max_cost_usd
@@ -269,29 +283,29 @@
 
 ## 六、组件职责边界
 
-| 组件 | 技术栈 | 做什么 | 不做什么 | MVP |
-|------|--------|--------|----------|-----|
-| Gateway | Go HTTP :8080 | 唯一 task 创建方、启动 Workflow、状态查询、SSE 推送 | 直接调用 LLM、做 Agent 推理 | 是 |
-| Temporal | Temporal | Workflow 执行状态事实来源、Activity 调度 | 直接操作 DB/Redis | 是 |
-| Go Worker | Go | 注册 Workflow/Activity、执行 SimpleWorkflow | Workflow 直接 HTTP/DB/Redis | 是 |
-| SimpleWorkflow | Go | 确定性编排逻辑、调用 Activities | 直接 IO、goroutine/随机数 | 是 |
-| Activity 层 | Go | 所有外部 IO（HTTP/DB/Redis） | 直接在 Workflow 中调用 | 是 |
-| EmitEventActivity | Go | 写事件到 Redis Stream | 阻断主流程 | 是 |
-| LoadSessionActivity | Go | 读取 Redis session messages | 写操作 | 是 |
-| EstimatePromptTokensActivity | Go | 估算 prompt tokens (len/4) | LLM 调用 | 是 |
-| CheckBudgetActivity | Go | 检查 max_total/max_completion | 直接拒绝请求 | 是 |
-| AgentActivity | Go | 调用 Python LLM Service | 直接调 LLM provider | 是 |
-| RecordUsageActivity | Go | 写 llm_calls 到 Postgres | 业务决策 | 是 |
-| SaveSessionActivity | Go | 写 session 到 Redis（必做）、Postgres（可选） | - | 是 |
-| SaveResultActivity | Go | 更新 task result 到 Postgres | - | 是 |
-| RecordExecutionCompletedActivity | Go | 更新 execution status=completed | - | 是 |
-| SaveFailureActivity | Go | 记录 task 失败信息 | - | 是 |
-| RecordExecutionFailedActivity | Go | 更新 execution status=failed | - | 是 |
-| Python LLM Service | Python FastAPI :8000 | OpenAI-compatible 调用、usage 返回、GET /health | 任务编排、状态管理 | 是 |
-| PostgreSQL | PostgreSQL :5432 | tasks/executions/llm_calls 持久化 | 向量检索、短期缓存 | 是 |
-| Redis | Redis :6379 | session cache（必做）、task status cache、events stream | 长期存储、事实来源 | 是 |
-| Config System | Go + YAML | 加载配置、feature flag、model/budget 配置 | 运行时修改 | 是 |
-| Temporal UI | Browser :8088 | Temporal History 可视化 | - | 是 |
+| 组件                             | 技术栈               | 做什么                                                  | 不做什么                    | MVP |
+| -------------------------------- | -------------------- | ------------------------------------------------------- | --------------------------- | --- |
+| Gateway                          | Go HTTP :8080        | 唯一 task 创建方、启动 Workflow、状态查询、SSE 推送     | 直接调用 LLM、做 Agent 推理 | 是  |
+| Temporal                         | Temporal             | Workflow 执行状态事实来源、Activity 调度                | 直接操作 DB/Redis           | 是  |
+| Go Worker                        | Go                   | 注册 Workflow/Activity、执行 SimpleWorkflow             | Workflow 直接 HTTP/DB/Redis | 是  |
+| SimpleWorkflow                   | Go                   | 确定性编排逻辑、调用 Activities                         | 直接 IO、goroutine/随机数   | 是  |
+| Activity 层                      | Go                   | 所有外部 IO（HTTP/DB/Redis）                            | 直接在 Workflow 中调用      | 是  |
+| EmitEventActivity                | Go                   | 写事件到 Redis Stream                                   | 阻断主流程                  | 是  |
+| LoadSessionActivity              | Go                   | 读取 Redis session messages                             | 写操作                      | 是  |
+| EstimatePromptTokensActivity     | Go                   | 估算 prompt tokens (len/4)                              | LLM 调用                    | 是  |
+| CheckBudgetActivity              | Go                   | 检查 max_total/max_completion                           | 直接拒绝请求                | 是  |
+| AgentActivity                    | Go                   | 调用 Python LLM Service                                 | 直接调 LLM provider         | 是  |
+| RecordUsageActivity              | Go                   | 写 llm_calls 到 Postgres                                | 业务决策                    | 是  |
+| SaveSessionActivity              | Go                   | 写 session 到 Redis（必做）、Postgres（可选）           | -                           | 是  |
+| SaveResultActivity               | Go                   | 更新 task result 到 Postgres                            | -                           | 是  |
+| RecordExecutionCompletedActivity | Go                   | 更新 execution status=completed                         | -                           | 是  |
+| SaveFailureActivity              | Go                   | 记录 task 失败信息                                      | -                           | 是  |
+| RecordExecutionFailedActivity    | Go                   | 更新 execution status=failed                            | -                           | 是  |
+| Python LLM Service               | Python FastAPI :8000 | OpenAI-compatible 调用、usage 返回、GET /health         | 任务编排、状态管理          | 是  |
+| PostgreSQL                       | PostgreSQL :5432     | tasks/executions/llm_calls 持久化                       | 向量检索、短期缓存          | 是  |
+| Redis                            | Redis :6379          | session cache（必做）、task status cache、events stream | 长期存储、事实来源          | 是  |
+| Config System                    | Go + YAML            | 加载配置、feature flag、model/budget 配置               | 运行时修改                  | 是  |
+| Temporal UI                      | Browser :8088        | Temporal History 可视化                                 | -                           | 是  |
 
 ---
 
@@ -381,6 +395,7 @@ Client
 ### POST /api/v1/tasks
 
 **Request:**
+
 ```json
 {
   "query": "What is the capital of France?",
@@ -395,6 +410,7 @@ Client
 ```
 
 **Response (202 Accepted):**
+
 ```json
 {
   "task_id": "uuid-xxx",
@@ -408,6 +424,7 @@ Client
 ### GET /api/v1/tasks/{task_id}
 
 **Response:**
+
 ```json
 {
   "task_id": "uuid-xxx",
@@ -434,6 +451,7 @@ Client
 ### GET /api/v1/stream/sse?task_id=xxx
 
 **SSE Event Format:**
+
 ```
 event: TASK_CREATED
 data: {"task_id":"uuid-xxx","timestamp":"2026-05-12T10:00:00Z"}
@@ -454,6 +472,7 @@ data: {"task_id":"uuid-xxx","status":"completed","timestamp":"2026-05-12T10:00:0
 ### GET /health
 
 **Response:**
+
 ```json
 {
   "status": "healthy",
@@ -476,6 +495,7 @@ data: {"task_id":"uuid-xxx","status":"completed","timestamp":"2026-05-12T10:00:0
 ### SimpleWorkflow
 
 **输入：TaskRequest**
+
 ```go
 type TaskRequest struct {
     TaskID                 string
@@ -489,6 +509,7 @@ type TaskRequest struct {
 ```
 
 **输出：TaskResult**
+
 ```go
 type TaskResult struct {
     TaskID       string
@@ -502,21 +523,22 @@ type TaskResult struct {
 
 **Activities 清单：**
 
-| Activity | 职责 | Timeout | Retry Policy |
-|----------|------|---------|--------------|
-| EmitEventActivity | 写事件到 Redis Stream | 5s | NoRetry |
-| LoadSessionActivity | 读取 Redis session messages | 10s | Retry3x |
-| EstimatePromptTokensActivity | 估算 prompt tokens (MVP: ceil(len/4)) | 5s | NoRetry |
-| CheckBudgetActivity | 检查 max_total_tokens/max_completion_tokens | 5s | NoRetry |
-| AgentActivity | 调用 Python LLM Service | 60s | Retry2x |
-| RecordUsageActivity | 写 llm_calls 到 Postgres | 10s | Retry3x |
-| SaveSessionActivity | 写 session 到 Redis（必做）/ Postgres（可选） | 10s | Retry3x |
-| SaveResultActivity | 更新 task result 到 Postgres | 10s | Retry3x |
-| RecordExecutionCompletedActivity | 更新 execution status=completed | 10s | Retry3x |
-| SaveFailureActivity | 记录 task 失败信息 | 10s | Retry3x |
-| RecordExecutionFailedActivity | 更新 execution status=failed | 10s | Retry3x |
+| Activity                         | 职责                                          | Timeout | Retry Policy |
+| -------------------------------- | --------------------------------------------- | ------- | ------------ |
+| EmitEventActivity                | 写事件到 Redis Stream                         | 5s      | NoRetry      |
+| LoadSessionActivity              | 读取 Redis session messages                   | 10s     | Retry3x      |
+| EstimatePromptTokensActivity     | 估算 prompt tokens (MVP: ceil(len/4))         | 5s      | NoRetry      |
+| CheckBudgetActivity              | 检查 max_total_tokens/max_completion_tokens   | 5s      | NoRetry      |
+| AgentActivity                    | 调用 Python LLM Service                       | 60s     | Retry2x      |
+| RecordUsageActivity              | 写 llm_calls 到 Postgres                      | 10s     | Retry3x      |
+| SaveSessionActivity              | 写 session 到 Redis（必做）/ Postgres（可选） | 10s     | Retry3x      |
+| SaveResultActivity               | 更新 task result 到 Postgres                  | 10s     | Retry3x      |
+| RecordExecutionCompletedActivity | 更新 execution status=completed               | 10s     | Retry3x      |
+| SaveFailureActivity              | 记录 task 失败信息                            | 10s     | Retry3x      |
+| RecordExecutionFailedActivity    | 更新 execution status=failed                  | 10s     | Retry3x      |
 
 **关键约束：**
+
 - Workflow 内只写确定性逻辑
 - **Workflow 不直接 HTTP / DB / Redis，所有外部 IO 都放 Activity**
 - EmitEventActivity 失败只记录日志，不阻断主流程
@@ -542,6 +564,7 @@ async def health():
 ### POST /chat
 
 **LLMRequest:**
+
 ```python
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
@@ -560,6 +583,7 @@ class LLMRequest(BaseModel):
 ```
 
 **LLMResponse:**
+
 ```python
 class Usage(BaseModel):
     prompt_tokens: int
@@ -578,6 +602,7 @@ class LLMResponse(BaseModel):
 ```
 
 **接口实现（FastAPI + OpenAI SDK）：**
+
 ```python
 # python_llm_service/app.py
 from fastapi import FastAPI, HTTPException
@@ -653,16 +678,17 @@ async def chat(req: LLMRequest):
 
 ### Key 设计
 
-| Key Pattern | 类型 | 内容 | TTL | 说明 |
-|-------------|------|------|-----|------|
-| `session:{session_id}:messages` | List | 最近 50 条消息 JSON | 7 天 | LTRIM 保留最新 50 条 |
-| `task:{task_id}:status` | Hash | status, progress, updated_at | 1 天 | TTL 1 天 |
-| `task:{task_id}:events` | Stream | AgentEvent 列表 | 1 天 | MAXLEN 100 |
-| `idempotency:{key}` | String | task_id | 1 小时 | 可选 |
+| Key Pattern                     | 类型   | 内容                         | TTL    | 说明                 |
+| ------------------------------- | ------ | ---------------------------- | ------ | -------------------- |
+| `session:{session_id}:messages` | List   | 最近 50 条消息 JSON          | 7 天   | LTRIM 保留最新 50 条 |
+| `task:{task_id}:status`         | Hash   | status, progress, updated_at | 1 天   | TTL 1 天             |
+| `task:{task_id}:events`         | Stream | AgentEvent 列表              | 1 天   | MAXLEN 100           |
+| `idempotency:{key}`             | String | task_id                      | 1 小时 | 可选                 |
 
 ### 数据结构示例
 
 **session:{session_id}:messages:**
+
 ```
 LPUSH session:sess-123:messages '{"role":"user","content":"Hello","created_at":"2026-05-12T10:00:00Z"}'
 LTRIM session:sess-123:messages 0 49
@@ -670,12 +696,14 @@ EXPIRE session:sess-123:messages 604800
 ```
 
 **task:{task_id}:status:**
+
 ```
 HSET task:uuid-xxx status "running" progress "50%" updated_at "2026-05-12T10:00:03Z"
 EXPIRE task:uuid-xxx:status 86400
 ```
 
 **task:{task_id}:events:**
+
 ```
 XADD task:uuid-xxx:events * event_type "LLM_COMPLETED" payload '{"usage":{"total_tokens":35}}' created_at "2026-05-12T10:00:03Z"
 XTRIM task:uuid-xxx:events MAXLEN 100
@@ -783,6 +811,7 @@ CREATE INDEX idx_session_messages_session_id ON session_messages(session_id);
 ### 状态模型
 
 **Task Status:**
+
 - `pending` — Gateway 创建，Workflow 未启动
 - `running` — Workflow 执行中
 - `completed` — 成功完成
@@ -791,12 +820,14 @@ CREATE INDEX idx_session_messages_session_id ON session_messages(session_id);
 - `cancelled` — 后续预留
 
 **Executions Status:**
+
 - `running` — 执行中
 - `completed` — 成功完成
 - `failed` — 执行失败
 - `cancelled` — 后续预留
 
 **状态流转：**
+
 ```
 pending → running → completed
 pending → running → failed
@@ -817,20 +848,21 @@ WHERE id = $1 AND status = 'running';
 
 ## 十三、Error Taxonomy
 
-| error_type | 说明 | 来源 |
-|-----------|------|------|
-| `validation_error` | 请求参数校验失败 | Gateway |
-| `workflow_start_error` | Gateway 启动 Workflow 失败 | Gateway |
-| `workflow_error` | Workflow 执行内部错误 | Worker |
-| `llm_error` | LLM 调用错误 | AgentActivity |
-| `llm_timeout` | LLM 调用超时 | AgentActivity |
-| `budget_exceeded` | 超出 token 预算 | CheckBudgetActivity / RecordUsageActivity |
-| `db_error` | 数据库操作错误 | Activity |
-| `redis_error` | Redis 操作错误 | Activity |
-| `session_error` | Session 加载/保存错误 | LoadSessionActivity / SaveSessionActivity |
-| `unknown_error` | 未知错误 | - |
+| error_type             | 说明                       | 来源                                      |
+| ---------------------- | -------------------------- | ----------------------------------------- |
+| `validation_error`     | 请求参数校验失败           | Gateway                                   |
+| `workflow_start_error` | Gateway 启动 Workflow 失败 | Gateway                                   |
+| `workflow_error`       | Workflow 执行内部错误      | Worker                                    |
+| `llm_error`            | LLM 调用错误               | AgentActivity                             |
+| `llm_timeout`          | LLM 调用超时               | AgentActivity                             |
+| `budget_exceeded`      | 超出 token 预算            | CheckBudgetActivity / RecordUsageActivity |
+| `db_error`             | 数据库操作错误             | Activity                                  |
+| `redis_error`          | Redis 操作错误             | Activity                                  |
+| `session_error`        | Session 加载/保存错误      | LoadSessionActivity / SaveSessionActivity |
+| `unknown_error`        | 未知错误                   | -                                         |
 
 **TASK_FAILED event payload:**
+
 ```json
 {
   "task_id": "uuid-xxx",
@@ -860,17 +892,17 @@ type AgentEvent struct {
 
 ### 事件类型
 
-| 事件类型 | Payload | 说明 |
-|---------|---------|------|
-| TASK_CREATED | task_id, workflow_id, query, timestamp | Gateway 写 |
-| WORKFLOW_STARTED | task_id, workflow_id, run_id, timestamp | SimpleWorkflow |
-| SESSION_LOADED | task_id, message_count, timestamp | LoadSessionActivity |
-| LLM_STARTED | task_id, model, timestamp | AgentActivity |
-| LLM_COMPLETED | task_id, usage, latency_ms, finish_reason, timestamp | AgentActivity |
-| USAGE_RECORDED | task_id, total_tokens, timestamp | RecordUsageActivity |
-| TASK_COMPLETED | task_id, status, result_length, timestamp | SimpleWorkflow |
-| TASK_FAILED | task_id, error_type, message, timestamp | SimpleWorkflow |
-| TASK_BUDGET_EXCEEDED | task_id, estimated_prompt, max_total, timestamp | CheckBudgetActivity |
+| 事件类型             | Payload                                              | 说明                |
+| -------------------- | ---------------------------------------------------- | ------------------- |
+| TASK_CREATED         | task_id, workflow_id, query, timestamp               | Gateway 写          |
+| WORKFLOW_STARTED     | task_id, workflow_id, run_id, timestamp              | SimpleWorkflow      |
+| SESSION_LOADED       | task_id, message_count, timestamp                    | LoadSessionActivity |
+| LLM_STARTED          | task_id, model, timestamp                            | AgentActivity       |
+| LLM_COMPLETED        | task_id, usage, latency_ms, finish_reason, timestamp | AgentActivity       |
+| USAGE_RECORDED       | task_id, total_tokens, timestamp                     | RecordUsageActivity |
+| TASK_COMPLETED       | task_id, status, result_length, timestamp            | SimpleWorkflow      |
+| TASK_FAILED          | task_id, error_type, message, timestamp              | SimpleWorkflow      |
+| TASK_BUDGET_EXCEEDED | task_id, estimated_prompt, max_total, timestamp      | CheckBudgetActivity |
 
 ### EmitEventActivity 实现
 
@@ -945,11 +977,11 @@ func (g *Gateway) SSEHandler(w http.ResponseWriter, r *http.Request) {
 
 ### Task Config
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| max_total_tokens | int | prompt + completion 总预算，默认 8000 |
-| max_completion_tokens | int | provider 输出上限，默认 1024 |
-| model | string | 使用的模型 |
+| 字段                  | 类型   | 说明                                  |
+| --------------------- | ------ | ------------------------------------- |
+| max_total_tokens      | int    | prompt + completion 总预算，默认 8000 |
+| max_completion_tokens | int    | provider 输出上限，默认 1024          |
+| model                 | string | 使用的模型                            |
 
 ### Budget 检查流程
 
@@ -1078,7 +1110,7 @@ features:
   enable_sse: true
   enable_budget: true
   enable_session_memory: true
-  enable_session_postgres: false  # MVP: false, Redis session 必做
+  enable_session_postgres: false # MVP: false, Redis session 必做
   enable_idempotency: false
 ```
 
@@ -1115,15 +1147,14 @@ func Load(path string) (*Config, error) {
 
 ### 端口定义
 
-| 服务 | 端口 | 说明 |
-|------|------|------|
-| Gateway | 8080 | HTTP API / SSE |
-| Temporal Server | 7233 | Temporal gRPC，Gateway 和 Worker 连接它 |
-| Temporal UI | 8088 | Temporal Web UI |
-| Python LLM Service | 8000 | REST API |
-| PostgreSQL | 5432 | Database |
-| Redis | 6379 | Cache / Stream |
-| Worker | 无公开端口 | 作为 Temporal Worker 进程轮询 Task Queue |
+| 服务               | 端口 | 说明            |
+| ------------------ | ---- | --------------- |
+| Gateway            | 8080 | HTTP API        |
+| Temporal UI        | 8088 | Temporal Web UI |
+| Temporal           | 7233 | Temporal gRPC   |
+| Python LLM Service | 8000 | REST API        |
+| PostgreSQL         | 5432 | Database        |
+| Redis              | 6379 | Cache/Stream    |
 
 ### Postgres 初始化说明
 
@@ -1143,6 +1174,7 @@ MVP 阶段使用一个 Postgres 容器承载开发环境数据库，但需要区
 Postgres 官方镜像只会执行 `/docker-entrypoint-initdb.d` 目录下的 `.sql` 和 `.sh` 文件，不会自动递归执行子目录。因此业务 schema 文件通过单独 volume 挂载到 `/migrations`，再由 init shell 脚本显式执行。
 
 **目录结构：**
+
 ```
 deploy/
 ├── docker-compose.yaml
@@ -1151,6 +1183,7 @@ deploy/
 ```
 
 **01-init-orchestrator.sh:**
+
 ```bash
 #!/bin/bash
 set -e
@@ -1184,7 +1217,7 @@ chmod +x deploy/postgres-init/01-init-orchestrator.sh
 
 ```yaml
 # deploy/docker-compose.yaml
-version: '3.8'
+version: "3.8"
 
 services:
   # Temporal Core
@@ -1364,6 +1397,8 @@ my-orchestrator/
 │       └── 01-init-orchestrator.sh    # 需要 chmod +x
 ├── migrations/
 │   └── 001_init.sql                   # 业务表结构，被 init script 显式加载
+├── migrations/
+│   └── 001_init.sql             # 业务表结构
 ├── scripts/
 │   └── smoke_test.sh
 ├── .env.example
@@ -1381,6 +1416,7 @@ my-orchestrator/
 **目标**：docker-compose 起基础服务，Gateway 提供任务提交和查询 API，不强求完整 Workflow
 
 **任务**：
+
 - [ ] 1.1 编写 docker-compose.yaml（Temporal + Postgres + Redis + Temporal UI）
 - [ ] 1.2 编写 deploy/postgres-init/01-init-orchestrator.sh（创建 orchestrator database）
 - [ ] 1.3 编写 migrations/001_init.sql（tasks/executions/llm_calls 表 + CHECK 约束）
@@ -1392,6 +1428,7 @@ my-orchestrator/
 - [ ] 1.9 实现 Gateway 创建 task（生成 task_id、插入 tasks(status=pending)、启动 Workflow、更新 tasks(status=running, run_id)、插入 executions(status=running)）
 
 **验收**：
+
 - `docker-compose up` 能启动所有服务
 - Gateway healthcheck 正常
 - POST /api/v1/tasks 返回 task_id + workflow_id + run_id + status=running + stream_url
@@ -1404,6 +1441,7 @@ my-orchestrator/
 **目标**：Gateway 能启动 Temporal Workflow，Worker 能执行 SimpleWorkflow
 
 **任务**：
+
 - [ ] 2.1 实现 Go Worker main.go，注册 Workflow 和 Activities
 - [ ] 2.2 实现 Temporal Client 从 Gateway 启动 Workflow（获取 run_id、更新 tasks）
 - [ ] 2.3 实现 SimpleWorkflow（确定性编排逻辑，Workflow 不直接 HTTP/DB/Redis）
@@ -1414,6 +1452,7 @@ my-orchestrator/
 - [ ] 2.8 端到端测试：POST /tasks → Gateway 启动 Workflow → executions 有记录
 
 **验收**：
+
 - POST /tasks 后 tasks.status=running，tasks.workflow_id="task-"+task_id，tasks.run_id 有值
 - executions 表有对应记录 status=running
 - Workflow 空跑后 tasks.status=completed，executions.status=completed
@@ -1425,6 +1464,7 @@ my-orchestrator/
 **目标**：真实 LLM 调用，session 消息管理，usage 记录
 
 **任务**：
+
 - [ ] 3.1 实现 Python LLM Service（GET /health, POST /chat + openai_compatible adapter）
 - [ ] 3.2 实现 AgentActivity（调用 Python LLM Service）
 - [ ] 3.3 实现 LoadSessionActivity（读 Redis session messages）
@@ -1436,6 +1476,7 @@ my-orchestrator/
 - [ ] 3.9 Budget 超限处理（budget_exceeded 标记）
 
 **验收**：
+
 - 输入 query，返回真实 LLM answer
 - llm_calls 表有 usage 记录
 - session_id 下能保存和加载最近消息（Redis）
@@ -1448,6 +1489,7 @@ my-orchestrator/
 **目标**：完整事件流、smoke test、README
 
 **任务**：
+
 - [ ] 4.1 实现 Gateway SSE endpoint（从 Redis Stream 读取）
 - [ ] 4.2 SSE 终态事件后关闭连接（TASK_COMPLETED/TASK_FAILED/TASK_BUDGET_EXCEEDED）
 - [ ] 4.3 端到端测试 SSE 事件流（至少看到 TASK_CREATED, WORKFLOW_STARTED, LLM_STARTED, LLM_COMPLETED, TASK_COMPLETED）
@@ -1456,6 +1498,7 @@ my-orchestrator/
 - [ ] 4.6 完整联调，修复 bug
 
 **验收**：
+
 - 客户端 SSE 能看到至少 5 类事件
 - smoke_test.sh 能完整跑通
 - README 能让新开发者从零跑通
@@ -1464,22 +1507,22 @@ my-orchestrator/
 
 ## 二十、验收标准
 
-| # | 标准 | 验证方式 |
-|---|------|----------|
-| 1 | docker-compose up 能启动所有 MVP 服务 | 手动验证 |
-| 2 | Gateway GET /health 返回 healthy | curl http://localhost:8080/health |
-| 3 | Temporal UI 可访问 http://localhost:8088 | 浏览器验证 |
-| 4 | POST /api/v1/tasks 能提交任务，返回 task_id + workflow_id + run_id | curl 测试 |
-| 5 | tasks.workflow_id = "task-" + task_id，tasks.run_id 有值，tasks.status = "running" | psql 验证 |
-| 6 | executions 表有对应记录，status = "running" | psql 验证 |
-| 7 | tasks.status 和 executions.status 有 CHECK 约束 | psql 验证 |
-| 8 | Worker 通过 Temporal 执行 SimpleWorkflow | Temporal UI 验证 |
-| 9 | AgentActivity 调用 Python LLM Service | 日志验证 |
-| 10 | llm_calls 表有 usage 记录（prompt/completion/total_tokens） | psql 验证 |
-| 11 | Redis Stream 有 task:{task_id}:events | redis-cli 验证 |
-| 12 | SSE 能看到 TASK_CREATED, WORKFLOW_STARTED, LLM_STARTED, LLM_COMPLETED, TASK_COMPLETED | curl + 日志验证 |
-| 13 | max_total_tokens / max_completion_tokens 生效（超限标记 budget_exceeded） | curl 测试 |
-| 14 | smoke_test.sh 完整跑通（使用 docker compose exec） | bash scripts/smoke_test.sh |
+| #   | 标准                                                                                  | 验证方式                          |
+| --- | ------------------------------------------------------------------------------------- | --------------------------------- |
+| 1   | docker-compose up 能启动所有 MVP 服务                                                 | 手动验证                          |
+| 2   | Gateway GET /health 返回 healthy                                                      | curl http://localhost:8080/health |
+| 3   | Temporal UI 可访问 http://localhost:8088                                              | 浏览器验证                        |
+| 4   | POST /api/v1/tasks 能提交任务，返回 task_id + workflow_id + run_id                    | curl 测试                         |
+| 5   | tasks.workflow_id = "task-" + task_id，tasks.run_id 有值，tasks.status = "running"    | psql 验证                         |
+| 6   | executions 表有对应记录，status = "running"                                           | psql 验证                         |
+| 7   | tasks.status 和 executions.status 有 CHECK 约束                                       | psql 验证                         |
+| 8   | Worker 通过 Temporal 执行 SimpleWorkflow                                              | Temporal UI 验证                  |
+| 9   | AgentActivity 调用 Python LLM Service                                                 | 日志验证                          |
+| 10  | llm_calls 表有 usage 记录（prompt/completion/total_tokens）                           | psql 验证                         |
+| 11  | Redis Stream 有 task:{task_id}:events                                                 | redis-cli 验证                    |
+| 12  | SSE 能看到 TASK_CREATED, WORKFLOW_STARTED, LLM_STARTED, LLM_COMPLETED, TASK_COMPLETED | curl + 日志验证                   |
+| 13  | max_total_tokens / max_completion_tokens 生效（超限标记 budget_exceeded）             | curl 测试                         |
+| 14  | smoke_test.sh 完整跑通（使用 docker compose exec）                                    | bash scripts/smoke_test.sh        |
 
 ---
 
@@ -1576,20 +1619,20 @@ my-orchestrator/
 
 ## 二十二、风险与取舍
 
-| 取舍 | 理由 |
-|------|------|
-| 不做 DAG | 先保证单链路稳定，DAG 复杂度需要更完善的错误处理和状态管理 |
-| 不做 RAG | 避免 ingestion/retrieval/context packing 过早复杂化，MVP 聚焦核心链路 |
-| 不做 Rust Code Runner | 沙盒隔离需要 WASI/Docker/gVisor 等专门基础设施，第一版不需要 |
-| 不做 OPA | 第一版没有复杂租户和权限场景 |
-| 不做 Multi-Agent | 单 Agent 调用足够验证架构，后续可按 Phase 2 扩展 |
-| 不做 Cancel API | 第一版简化，Cancel 需要 Workflow 取消传播机制，后续 Phase 6 实现 |
-| Redis 只做短期缓存 | 不能替代 Postgres 作为事实来源，避免双写一致性问题 |
-| EmitEventActivity 失败不 fallback Postgres | 简化第一版实现，事件只是观察性通道 |
-| Temporal 和 Postgres 双状态 | Temporal 是执行事实来源，Postgres 是查询投影，明确边界避免混乱 |
-| Gateway 不要变成上帝服务 | 只做 API、状态聚合、事件流，不做业务逻辑 |
-| Python LLM Service 不要变成调度器 | 只做模型调用，职责单一 |
-| 第一版重点是"跑通可靠闭环" | 不是"功能完整"，4 周内可演示的核心价值流 |
+| 取舍                                       | 理由                                                                  |
+| ------------------------------------------ | --------------------------------------------------------------------- |
+| 不做 DAG                                   | 先保证单链路稳定，DAG 复杂度需要更完善的错误处理和状态管理            |
+| 不做 RAG                                   | 避免 ingestion/retrieval/context packing 过早复杂化，MVP 聚焦核心链路 |
+| 不做 Rust Code Runner                      | 沙盒隔离需要 WASI/Docker/gVisor 等专门基础设施，第一版不需要          |
+| 不做 OPA                                   | 第一版没有复杂租户和权限场景                                          |
+| 不做 Multi-Agent                           | 单 Agent 调用足够验证架构，后续可按 Phase 2 扩展                      |
+| 不做 Cancel API                            | 第一版简化，Cancel 需要 Workflow 取消传播机制，后续 Phase 6 实现      |
+| Redis 只做短期缓存                         | 不能替代 Postgres 作为事实来源，避免双写一致性问题                    |
+| EmitEventActivity 失败不 fallback Postgres | 简化第一版实现，事件只是观察性通道                                    |
+| Temporal 和 Postgres 双状态                | Temporal 是执行事实来源，Postgres 是查询投影，明确边界避免混乱        |
+| Gateway 不要变成上帝服务                   | 只做 API、状态聚合、事件流，不做业务逻辑                              |
+| Python LLM Service 不要变成调度器          | 只做模型调用，职责单一                                                |
+| 第一版重点是"跑通可靠闭环"                 | 不是"功能完整"，4 周内可演示的核心价值流                              |
 
 ---
 
@@ -1682,4 +1725,4 @@ echo "=== ALL TESTS PASSED ==="
 
 ---
 
-*MVP 版本任务书（最终实施级修正版）— 强调组件协同边界和可复刻性。*
+_MVP 版本任务书（最终实施级修正版）— 强调组件协同边界和可复刻性。_
