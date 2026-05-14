@@ -88,17 +88,23 @@ func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (*types.TaskD
 		sessionID = &sessionIDVal
 	}
 
+	var taskResult *string
+	if resultVal := result["result"]; resultVal != "" {
+		taskResult = &resultVal
+	}
+
 	return &types.TaskDetailResponse{
-		TaskID:             result["task_id"],
-		WorkflowID:         result["workflow_id"],
-		RunID:              runID,
-		SessionID:          sessionID,
-		Status:             result["status"],
-		Model:              result["model"],
+		TaskID:              result["task_id"],
+		WorkflowID:          result["workflow_id"],
+		RunID:               runID,
+		SessionID:           sessionID,
+		Status:              result["status"],
+		Result:              taskResult,
+		Model:               result["model"],
 		MaxTotalTokens:      parseInt(result["max_total_tokens"]),
 		MaxCompletionTokens: parseInt(result["max_completion_tokens"]),
-		CreatedAt:          createdAt,
-		UpdatedAt:          updatedAt,
+		CreatedAt:           createdAt,
+		UpdatedAt:           updatedAt,
 	}, nil
 }
 

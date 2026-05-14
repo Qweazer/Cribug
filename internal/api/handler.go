@@ -103,12 +103,14 @@ func (h *Handler) createTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	runID := wfRun.GetRunID()
+	workflowReq.RunID = runID
 
 	if err := h.db.UpdateTaskRunning(ctx, taskID, runID); err != nil {
 		log.Printf("[WARN] update task to running: %v", err)
 	}
 
 	execID := uuid.New().String()
+	log.Printf("[DEBUG] creating execution: id=%s task_id=%s workflow_id=%s run_id=%s", execID, taskID, workflowID, runID)
 	if err := activities.CreateExecution(h.db.Stdlib(), execID, taskID, workflowID, runID); err != nil {
 		log.Printf("[WARN] create execution: %v", err)
 	}

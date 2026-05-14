@@ -32,13 +32,18 @@ func main() {
 	}
 	defer redisClient.Close()
 
-	temporalClient, err := client.Dial(client.Options{
-		HostPort: cfg.TemporalAddress,
-	})
+	var temporalClient client.Client
+
+	_client, err := dialTemporalWithTimeout(cfg.TemporalAddress, 5*time.Second)
 	if err != nil {
-		log.Fatalf("failed to connect to temporal: %v", err)
+		log.Printf("[WARN] failed to connect to temporal: %v (continuing without temporal)", err)
+	} else {
+		temporalClient = _client
 	}
-	defer temporalClient.Close()
+
+	if temporalClient != nil {
+		defer temporalClient.Close()
+	}
 
 	h := api.NewHandler(dbClient, redisClient, temporalClient)
 	r := api.NewRouter(h)
@@ -72,4 +77,27 @@ func main() {
 	}
 
 	log.Println("server stopped")
+}
+
+func dialTemporalWithTimeout(hostPort string, timeout time.Duration) (client.Client, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	type result struct {
+		c   client.Client
+		err error
+	}
+	ch := make(chan result, 1)
+
+	go func() {
+		c, err := client.Dial(client.Options{HostPort: hostPort})
+		ch <- result{c, err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case r := <-ch:
+		return r.c, r.err
+	}
 }

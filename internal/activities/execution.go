@@ -33,16 +33,16 @@ type RecordExecutionFailedInput struct {
 
 func (a *ExecutionActivities) RecordCompleted(ctx context.Context, input RecordExecutionInput) error {
 	logger := activity.GetLogger(ctx)
-	logger.Info("RecordExecutionCompletedActivity started", "task_id", input.TaskID)
+	logger.Info("RecordExecutionCompletedActivity started", "task_id", input.TaskID, "workflow_id", input.WorkflowID, "run_id", input.RunID)
 
 	query := `
 		UPDATE executions
 		SET status = 'completed', completed_at = NOW(), updated_at = NOW()
-		WHERE task_id = $1 AND workflow_id = $2 AND run_id = $3 AND status = 'running'
+		WHERE task_id = $1 AND workflow_id = $2 AND status = 'running'
 		RETURNING id`
 
 	var id string
-	err := a.db.QueryRowContext(ctx, query, input.TaskID, input.WorkflowID, input.RunID).Scan(&id)
+	err := a.db.QueryRowContext(ctx, query, input.TaskID, input.WorkflowID).Scan(&id)
 	if err == sql.ErrNoRows {
 		logger.Warn("RecordExecutionCompletedActivity: no matching row to update",
 			"task_id", input.TaskID, "workflow_id", input.WorkflowID, "run_id", input.RunID)
@@ -94,6 +94,10 @@ func CreateExecution(db *sql.DB, id, taskID, workflowID, runID string) error {
 		VALUES ($1, $2, $3, $4, 'running', NOW(), NOW(), NOW())
 		ON CONFLICT (workflow_id, run_id) DO NOTHING`
 
+	log.Printf("[DEBUG] CreateExecution SQL: id=%s task_id=%s workflow_id=%s run_id=%s", id, taskID, workflowID, runID)
 	_, err := db.ExecContext(context.Background(), query, id, taskID, workflowID, runID)
+	if err != nil {
+		log.Printf("[ERROR] CreateExecution failed: %v", err)
+	}
 	return err
 }
