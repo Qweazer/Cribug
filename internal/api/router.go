@@ -24,6 +24,7 @@ func NewRouter(h *Handler) *chi.Mux {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Post("/tasks", h.createTask)
 		r.Get("/tasks/{id}", h.getTask)
+		r.Get("/stream/sse", h.streamTaskEvents)
 	})
 
 	return r

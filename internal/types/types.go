@@ -141,3 +141,40 @@ type WorkflowTaskResult struct {
 	Answer  string
 	Error   string
 }
+
+// LLM types for AgentActivity
+
+type LLMMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type LLMRequest struct {
+	TraceID             string         `json:"trace_id"`
+	TaskID              string         `json:"task_id"`
+	SessionID           *string        `json:"session_id,omitempty"`
+	Provider            string         `json:"provider"`
+	Model               string         `json:"model"`
+	Messages            []LLMMessage   `json:"messages"`
+	Temperature         float64        `json:"temperature"`
+	MaxCompletionTokens int            `json:"max_completion_tokens"`
+	ResponseFormat      *string        `json:"response_format,omitempty"`
+	Metadata            map[string]any `json:"metadata,omitempty"`
+}
+
+type Usage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+type LLMResponse struct {
+	Content            string  `json:"content"`
+	Usage              Usage   `json:"usage"`
+	Model              string  `json:"model"`
+	Provider           string  `json:"provider"`
+	FinishReason       string  `json:"finish_reason"`
+	ProviderResponseID *string `json:"provider_response_id,omitempty"`
+	LatencyMS          int64   `json:"latency_ms"`
+	Error              *string `json:"error,omitempty"`
+}

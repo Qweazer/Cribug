@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -88,6 +89,14 @@ func (h *Handler) createTask(w http.ResponseWriter, r *http.Request) {
 		RunID:               "",
 	}
 
+	if h.temporal == nil {
+		log.Printf("[ERROR] temporal client is not connected")
+		h.db.UpdateTaskError(ctx, taskID, types.ErrorTypeWorkflowStart, "temporal client not connected")
+		h.redis.UpdateTaskError(ctx, taskID, types.ErrorTypeWorkflowStart, "temporal client not connected")
+		WriteError(w, http.StatusServiceUnavailable, "temporal service unavailable", types.ErrorTypeWorkflowStart)
+		return
+	}
+
 	startOpts := client.StartWorkflowOptions{
 		TaskQueue: "orchestrator-task-queue",
 		ID:        workflowID,
@@ -145,11 +154,7 @@ func (h *Handler) getTask(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[WARN] get task from redis: %v", err)
 	}
 
-	if taskDetail != nil {
-		WriteJSON(w, http.StatusOK, taskDetail)
-		return
-	}
-
+	// Always fetch from DB for usage fields
 	task, err := h.db.GetTaskByID(ctx, taskID)
 	if err != nil {
 		log.Printf("[ERROR] get task from db: %v", err)
@@ -162,7 +167,26 @@ func (h *Handler) getTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, h.toTaskDetailResponse(task))
+	// Use DB task as base, but enrich with Redis data if available
+	resp := h.toTaskDetailResponse(task)
+
+	if taskDetail != nil {
+		// Only update non-usage fields from Redis (status, result, etc.)
+		if taskDetail.Status != "" {
+			resp.Status = taskDetail.Status
+		}
+		if taskDetail.Result != nil {
+			resp.Result = taskDetail.Result
+		}
+		if taskDetail.Error != nil {
+			resp.Error = taskDetail.Error
+		}
+		if taskDetail.ErrorType != nil {
+			resp.ErrorType = taskDetail.ErrorType
+		}
+	}
+
+	WriteJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) toTaskDetailResponse(task *types.Task) *types.TaskDetailResponse {
@@ -171,8 +195,8 @@ func (h *Handler) toTaskDetailResponse(task *types.Task) *types.TaskDetailRespon
 		WorkflowID:          task.WorkflowID,
 		Status:              task.Status,
 		Model:               task.Model,
-		MaxTotalTokens:       task.MaxTotalTokens,
-		MaxCompletionTokens:  task.MaxCompletionTokens,
+		MaxTotalTokens:      task.MaxTotalTokens,
+		MaxCompletionTokens: task.MaxCompletionTokens,
 		CreatedAt:           task.CreatedAt,
 		UpdatedAt:           task.UpdatedAt,
 	}
@@ -192,14 +216,16 @@ func (h *Handler) toTaskDetailResponse(task *types.Task) *types.TaskDetailRespon
 	if task.ErrorType.Valid {
 		resp.ErrorType = &task.ErrorType.String
 	}
-	if task.UsageTotalTokens.Valid {
-		promptTokens := toPtr(int(task.UsagePromptTokens.Int64))
-		completionTokens := toPtr(int(task.UsageCompletionTokens.Int64))
-		totalTokens := toPtr(int(task.UsageTotalTokens.Int64))
+
+	// Always include usage if we have total_tokens
+	if task.UsageTotalTokens.Valid && task.UsageTotalTokens.Int64 > 0 {
+		promptVal := int(task.UsagePromptTokens.Int64)
+		completionVal := int(task.UsageCompletionTokens.Int64)
+		totalVal := int(task.UsageTotalTokens.Int64)
 		resp.Usage = &types.TaskUsage{
-			PromptTokens:     promptTokens,
-			CompletionTokens: completionTokens,
-			TotalTokens:      totalTokens,
+			PromptTokens:     &promptVal,
+			CompletionTokens: &completionVal,
+			TotalTokens:      &totalVal,
 		}
 	}
 
@@ -208,4 +234,95 @@ func (h *Handler) toTaskDetailResponse(task *types.Task) *types.TaskDetailRespon
 
 func toPtr[T any](v T) *T {
 	return &v
+}
+
+func (h *Handler) streamTaskEvents(w http.ResponseWriter, r *http.Request) {
+	taskID := r.URL.Query().Get("task_id")
+	if taskID == "" {
+		WriteError(w, http.StatusBadRequest, "task_id is required", types.ErrorTypeValidation)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		WriteError(w, http.StatusInternalServerError, "streaming unsupported", types.ErrorTypeUnknown)
+		return
+	}
+
+	ctx := r.Context()
+
+	events, err := h.redis.ReadTaskEvents(ctx, taskID)
+	if err != nil {
+		log.Printf("[ERROR] read existing task events failed: %v", err)
+		WriteError(w, http.StatusInternalServerError, "failed to read task events", types.ErrorTypeRedis)
+		return
+	}
+
+	lastID := "0"
+	terminal := false
+
+	for _, e := range events {
+		lastID = e.ID
+		writeSSE(w, e.EventType, e.Payload)
+		if isTerminalEvent(e.EventType) {
+			terminal = true
+		}
+	}
+	flusher.Flush()
+
+	if terminal {
+		return
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		newEvents, err := h.redis.ReadTaskEventsBlocking(ctx, taskID, lastID, 30*time.Second)
+		if err != nil {
+			log.Printf("[ERROR] blocking read task events failed: %v", err)
+			writeSSE(w, "ERROR", `{"error":"redis stream read failed"}`)
+			flusher.Flush()
+			return
+		}
+
+		if len(newEvents) == 0 {
+			fmt.Fprintf(w, ": ping\n\n")
+			flusher.Flush()
+			continue
+		}
+
+		for _, e := range newEvents {
+			lastID = e.ID
+			writeSSE(w, e.EventType, e.Payload)
+			flusher.Flush()
+
+			if isTerminalEvent(e.EventType) {
+				return
+			}
+		}
+	}
+}
+
+func writeSSE(w http.ResponseWriter, eventType string, payload string) {
+	fmt.Fprintf(w, "event: %s\n", eventType)
+	fmt.Fprintf(w, "data: %s\n\n", payload)
+}
+
+func isTerminalEvent(eventType string) bool {
+	switch eventType {
+	case events.EventTypeTaskCompleted, events.EventTypeTaskFailed, events.EventTypeTaskBudgetExceeded:
+		return true
+	default:
+		return false
+	}
 }

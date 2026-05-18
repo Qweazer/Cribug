@@ -33,7 +33,7 @@ services:
   temporal:
     image: temporalio/auto-setup:latest
     ports:
-      - "7233:7233"
+      - "17233:7233"
     environment:
       - DB=postgres12
       - DB_PORT=5432

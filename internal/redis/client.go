@@ -181,3 +181,161 @@ func (c *Client) UpdateTaskCompleted(ctx context.Context, taskID, result string)
 		log.Printf("[WARN] redis: update task completed: %v", err)
 	}
 }
+
+func (c *Client) UpdateTaskBudgetExceeded(ctx context.Context, taskID, reason string) {
+	key := fmt.Sprintf("task:%s:status", taskID)
+	fields := map[string]interface{}{
+		"status":      "budget_exceeded",
+		"error_type":  "budget_exceeded",
+		"error":       reason,
+		"updated_at":  time.Now().UTC().Format(time.RFC3339),
+	}
+
+	if _, err := c.client.HSet(ctx, key, fields).Result(); err != nil {
+		log.Printf("[WARN] redis: update task budget exceeded: %v", err)
+	}
+}
+
+type StreamEvent struct {
+	ID        string
+	EventType string
+	Payload   string
+	CreatedAt string
+}
+
+func (c *Client) ReadTaskEvents(ctx context.Context, taskID string) ([]StreamEvent, error) {
+	key := fmt.Sprintf("task:%s:events", taskID)
+	results, err := c.client.XRange(ctx, key, "0", "+").Result()
+	if err != nil {
+		return nil, fmt.Errorf("xrange: %w", err)
+	}
+
+	events := make([]StreamEvent, 0, len(results))
+	for _, r := range results {
+		events = append(events, streamEventFromXRANGE(r))
+	}
+	return events, nil
+}
+
+func (c *Client) ReadTaskEventsBlocking(ctx context.Context, taskID string, lastID string, block time.Duration) ([]StreamEvent, error) {
+	key := fmt.Sprintf("task:%s:events", taskID)
+
+	if lastID == "" {
+		lastID = "0"
+	}
+
+	streams, err := c.client.XRead(ctx, &redis.XReadArgs{
+		Streams: []string{key, lastID},
+		Block:   block,
+	}).Result()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("xread: %w", err)
+	}
+
+	events := make([]StreamEvent, 0)
+	for _, stream := range streams {
+		for _, r := range stream.Messages {
+			events = append(events, streamEventFromXMessage(r))
+		}
+	}
+	return events, nil
+}
+
+func streamEventFromXRANGE(r redis.XMessage) StreamEvent {
+	return StreamEvent{
+		ID:        r.ID,
+		EventType: getStreamField(r.Values, "event_type"),
+		Payload:   getStreamField(r.Values, "payload"),
+		CreatedAt: getStreamField(r.Values, "created_at"),
+	}
+}
+
+func streamEventFromXMessage(r redis.XMessage) StreamEvent {
+	return StreamEvent{
+		ID:        r.ID,
+		EventType: getStreamField(r.Values, "event_type"),
+		Payload:   getStreamField(r.Values, "payload"),
+		CreatedAt: getStreamField(r.Values, "created_at"),
+	}
+}
+
+func getStreamField(values map[string]interface{}, field string) string {
+	if v, ok := values[field]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+const (
+	SessionMaxMessages = 50
+	SessionTTL         = 7 * 24 * time.Hour // 7 days
+)
+
+func (c *Client) LoadSessionMessages(ctx context.Context, sessionID string) ([]types.LLMMessage, error) {
+	if sessionID == "" {
+		return nil, nil
+	}
+
+	key := fmt.Sprintf("session:%s:messages", sessionID)
+	results, err := c.client.LRange(ctx, key, 0, -1).Result()
+	if err != nil {
+		return nil, fmt.Errorf("lrange session messages: %w", err)
+	}
+
+	messages := make([]types.LLMMessage, 0, len(results))
+	for _, raw := range results {
+		var msg types.LLMMessage
+		if err := json.Unmarshal([]byte(raw), &msg); err != nil {
+			log.Printf("[WARN] redis: unmarshal session message: %v", err)
+			continue
+		}
+		messages = append(messages, msg)
+	}
+
+	return messages, nil
+}
+
+func (c *Client) SaveSessionMessages(ctx context.Context, sessionID string, userMsg, assistantMsg string) error {
+	if sessionID == "" {
+		return nil
+	}
+
+	key := fmt.Sprintf("session:%s:messages", sessionID)
+
+	if userMsg != "" {
+		userJSON, err := json.Marshal(types.LLMMessage{Role: "user", Content: userMsg})
+		if err != nil {
+			return fmt.Errorf("marshal user message: %w", err)
+		}
+		if err := c.client.RPush(ctx, key, string(userJSON)).Err(); err != nil {
+			return fmt.Errorf("rpush user message: %w", err)
+		}
+	}
+
+	if assistantMsg != "" {
+		assistantJSON, err := json.Marshal(types.LLMMessage{Role: "assistant", Content: assistantMsg})
+		if err != nil {
+			return fmt.Errorf("marshal assistant message: %w", err)
+		}
+		if err := c.client.RPush(ctx, key, string(assistantJSON)).Err(); err != nil {
+			return fmt.Errorf("rpush assistant message: %w", err)
+		}
+	}
+
+	// Trim to last 50 messages
+	if err := c.client.LTrim(ctx, key, -SessionMaxMessages, -1).Err(); err != nil {
+		return fmt.Errorf("ltrim session messages: %w", err)
+	}
+
+	// Set TTL
+	if err := c.client.Expire(ctx, key, SessionTTL).Err(); err != nil {
+		return fmt.Errorf("expire session messages: %w", err)
+	}
+
+	return nil
+}

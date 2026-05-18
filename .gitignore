@@ -1,18 +1,35 @@
+# Environment
 .env
+.env.local
+.env.*.local
+
+# Build outputs
+gateway
+worker
+*.exe
+
+# Logs
 *.log
+tmp/
+/tmp
 
-/bin/
-/dist/
-*.test
-coverage.out
-
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
 .venv/
-.pytest_cache/
+venv/
+ENV/
 
-.DS_Store
+# IDE
+.idea/
 .vscode/
+*.swp
+*.swo
 
-postgres_data/
-redis_data/
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporal
+.history/

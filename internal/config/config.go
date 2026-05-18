@@ -14,6 +14,7 @@ type Config struct {
 	HTTPAddr          string
 	TemporalAddress   string
 	TemporalTaskQueue string
+	LLMServiceURL     string
 }
 
 func Load() *Config {
@@ -25,6 +26,7 @@ func Load() *Config {
 		HTTPAddr:          getEnv("HTTP_ADDR", ":8080"),
 		TemporalAddress:   getEnv("TEMPORAL_ADDRESS", "localhost:7233"),
 		TemporalTaskQueue: getEnv("TEMPORAL_TASK_QUEUE", "orchestrator-task-queue"),
+		LLMServiceURL:     getEnv("LLM_SERVICE_URL", "http://127.0.0.1:8000"),
 	}
 
 	if urlStr := os.Getenv("REDIS_URL"); urlStr != "" {

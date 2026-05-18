@@ -3,10 +3,15 @@ package events
 import "time"
 
 const (
-	EventTypeTaskCreated      = "TASK_CREATED"
-	EventTypeWorkflowStarted  = "WORKFLOW_STARTED"
-	EventTypeTaskCompleted    = "TASK_COMPLETED"
-	EventTypeTaskFailed       = "TASK_FAILED"
+	EventTypeTaskCreated        = "TASK_CREATED"
+	EventTypeWorkflowStarted    = "WORKFLOW_STARTED"
+	EventTypeTaskCompleted      = "TASK_COMPLETED"
+	EventTypeTaskFailed         = "TASK_FAILED"
+	EventTypeLLMStarted         = "LLM_STARTED"
+	EventTypeLLMCompleted       = "LLM_COMPLETED"
+	EventTypeSessionLoaded      = "SESSION_LOADED"
+	EventTypeUsageRecorded      = "USAGE_RECORDED"
+	EventTypeTaskBudgetExceeded = "TASK_BUDGET_EXCEEDED"
 )
 
 type AgentEvent struct {
@@ -54,5 +59,49 @@ func NewTaskFailedEvent(taskID, workflowID, errorMsg string) AgentEvent {
 		"workflow_id": workflowID,
 		"error":       errorMsg,
 		"timestamp":   time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewLLMStartedEvent(taskID, model string) AgentEvent {
+	return NewAgentEvent(EventTypeLLMStarted, map[string]interface{}{
+		"task_id":   taskID,
+		"model":     model,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewLLMCompletedEvent(taskID, model, finishReason string, latencyMS int64) AgentEvent {
+	return NewAgentEvent(EventTypeLLMCompleted, map[string]interface{}{
+		"task_id":       taskID,
+		"model":         model,
+		"finish_reason": finishReason,
+		"latency_ms":    latencyMS,
+		"timestamp":     time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewSessionLoadedEvent(taskID string, messageCount int) AgentEvent {
+	return NewAgentEvent(EventTypeSessionLoaded, map[string]interface{}{
+		"task_id":       taskID,
+		"message_count": messageCount,
+		"timestamp":     time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewUsageRecordedEvent(taskID string, totalTokens int) AgentEvent {
+	return NewAgentEvent(EventTypeUsageRecorded, map[string]interface{}{
+		"task_id":      taskID,
+		"total_tokens": totalTokens,
+		"timestamp":    time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewTaskBudgetExceededEvent(taskID, reason string, estimatedPromptTokens, maxTotalTokens int) AgentEvent {
+	return NewAgentEvent(EventTypeTaskBudgetExceeded, map[string]interface{}{
+		"task_id":                 taskID,
+		"reason":                  reason,
+		"estimated_prompt_tokens": estimatedPromptTokens,
+		"max_total_tokens":        maxTotalTokens,
+		"timestamp":               time.Now().UTC().Format(time.RFC3339),
 	})
 }

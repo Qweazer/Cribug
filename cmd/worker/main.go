@@ -38,20 +38,32 @@ func main() {
 	}
 	defer temporalClient.Close()
 
+	// Initialize all activities
 	taskActivities := activities.NewTaskActivities(dbClient.Stdlib(), redisClient)
 	execActivities := activities.NewExecutionActivities(dbClient.Stdlib())
 	emitEventActivity := activities.NewEmitEventActivity(redisClient)
+	agentActivities := activities.NewAgentActivities(cfg.LLMServiceURL)
+	sessionActivities := activities.NewSessionActivities(redisClient)
+	budgetActivities := activities.NewBudgetActivities()
+	usageActivities := activities.NewUsageActivities(dbClient.Stdlib())
 
 	w := worker.New(temporalClient, cfg.TemporalTaskQueue, worker.Options{})
 
 	sw := workflows.NewSimpleWorkflow()
 	w.RegisterWorkflowWithOptions(sw.Execute, workflow.RegisterOptions{Name: workflows.WorkflowName})
 
+	// Register all activities
 	w.RegisterActivityWithOptions(emitEventActivity.Execute, activity.RegisterOptions{Name: "EmitEventActivity"})
 	w.RegisterActivityWithOptions(taskActivities.SaveResult, activity.RegisterOptions{Name: "SaveResultActivity"})
 	w.RegisterActivityWithOptions(taskActivities.SaveFailure, activity.RegisterOptions{Name: "SaveFailureActivity"})
 	w.RegisterActivityWithOptions(execActivities.RecordCompleted, activity.RegisterOptions{Name: "RecordExecutionCompletedActivity"})
 	w.RegisterActivityWithOptions(execActivities.RecordFailed, activity.RegisterOptions{Name: "RecordExecutionFailedActivity"})
+	w.RegisterActivityWithOptions(agentActivities.CallLLM, activity.RegisterOptions{Name: "AgentActivity"})
+	w.RegisterActivityWithOptions(sessionActivities.LoadSession, activity.RegisterOptions{Name: "LoadSessionActivity"})
+	w.RegisterActivityWithOptions(sessionActivities.SaveSession, activity.RegisterOptions{Name: "SaveSessionActivity"})
+	w.RegisterActivityWithOptions(budgetActivities.EstimatePromptTokens, activity.RegisterOptions{Name: "EstimatePromptTokensActivity"})
+	w.RegisterActivityWithOptions(budgetActivities.CheckBudget, activity.RegisterOptions{Name: "CheckBudgetActivity"})
+	w.RegisterActivityWithOptions(usageActivities.RecordUsage, activity.RegisterOptions{Name: "RecordUsageActivity"})
 
 	log.Printf("worker started, task_queue=%s", cfg.TemporalTaskQueue)
 	if err := w.Run(worker.InterruptCh()); err != nil {
