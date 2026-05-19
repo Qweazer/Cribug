@@ -1,37 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
-GATEWAY_URL="${GATEWAY_URL:-http://127.0.0.1:8080}"
-REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
-REDIS_PORT="${REDIS_PORT:-6379}"
+# Source common test helpers
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/test_helpers.sh"
 
 log() { echo "[$(date +'%H:%M:%S')] $*"; }
 fail() { echo "[FAIL] $*" >&2; exit 1; }
-
-redis_cmd() {
-  if command -v redis-cli &>/dev/null; then
-    redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" "$@"
-  else
-    docker.exe exec deploy-redis-1 redis-cli "$@"
-  fi
-}
-
-psql_cmd() {
-  docker.exe exec deploy-postgres-1 psql -U admin -d orchestrator -t -c "$1"
-}
-
-wait_task() {
-  local task_id=$1
-  for i in $(seq 1 60); do
-    local status=$(curl --noproxy '*' -s "$GATEWAY_URL/api/v1/tasks/$task_id" | jq -r '.status')
-    if [[ "$status" == "completed" ]] || [[ "$status" == "failed" ]] || [[ "$status" == "budget_exceeded" ]]; then
-      echo "$status"
-      return 0
-    fi
-    sleep 1
-  done
-  fail "Task $task_id timeout"
-}
 
 log "=== DAG Synthesis Smoke Test Starting ==="
 
@@ -55,63 +30,69 @@ TASK_ID=$(echo "$RESP" | jq -r '.task_id')
 
 log "  Task created: $TASK_ID"
 
-STATUS=$(wait_task $TASK_ID)
+STATUS=$(wait_for_task_terminal "$TASK_ID")
 [ "$STATUS" = "completed" ] || fail "DAG task expected completed, got $STATUS"
 log "  Task completed: $STATUS"
 
 sleep 2
 
 log "2. Checking result..."
-RESULT=$(curl --noproxy '*' -s "$GATEWAY_URL/api/v1/tasks/$TASK_ID" | jq -r '.result')
-echo "$RESULT" | grep -q "mock answer" || fail "Result does not contain LLM output: $RESULT"
-log "  Result: $RESULT"
+RESULT=$(get_task_result "$TASK_ID")
+echo "$RESULT" | grep -q "mock answer" || fail "Result does not contain mock answer: $RESULT"
+log "  Result: OK (mock answer present)"
 
 log "3. Checking Redis events for task_id=$TASK_ID..."
-EVENTS=$(redis_cmd XRANGE "task:$TASK_ID:events" - +)
-EVENT_COUNT=$(echo "$EVENTS" | wc -l)
-log "  Total events: $EVENT_COUNT"
 
-# Count required events
-DAG_NODE_STARTED=$(echo "$EVENTS" | grep --line-buffered -c "DAG_NODE_STARTED" || true)
+# Count DAG node events (should be 2)
+DAG_NODE_STARTED=$(count_task_event "$TASK_ID" "DAG_NODE_STARTED")
 [ "$DAG_NODE_STARTED" -ge 2 ] || fail "Expected at least 2 DAG_NODE_STARTED (found $DAG_NODE_STARTED)"
 log "  DAG_NODE_STARTED count: $DAG_NODE_STARTED"
 
-DAG_NODE_COMPLETED=$(echo "$EVENTS" | grep --line-buffered -c "DAG_NODE_COMPLETED" || true)
+DAG_NODE_COMPLETED=$(count_task_event "$TASK_ID" "DAG_NODE_COMPLETED")
 [ "$DAG_NODE_COMPLETED" -ge 2 ] || fail "Expected at least 2 DAG_NODE_COMPLETED (found $DAG_NODE_COMPLETED)"
 log "  DAG_NODE_COMPLETED count: $DAG_NODE_COMPLETED"
 
-LLM_STARTED=$(echo "$EVENTS" | grep --line-buffered -c "LLM_STARTED" || true)
+LLM_STARTED=$(count_task_event "$TASK_ID" "LLM_STARTED")
 [ "$LLM_STARTED" -ge 1 ] || fail "Expected at least 1 LLM_STARTED (found $LLM_STARTED)"
 log "  LLM_STARTED count: $LLM_STARTED"
 
-LLM_COMPLETED=$(echo "$EVENTS" | grep --line-buffered -c "LLM_COMPLETED" || true)
+LLM_COMPLETED=$(count_task_event "$TASK_ID" "LLM_COMPLETED")
 [ "$LLM_COMPLETED" -ge 1 ] || fail "Expected at least 1 LLM_COMPLETED (found $LLM_COMPLETED)"
 log "  LLM_COMPLETED count: $LLM_COMPLETED"
 
-DAG_SYNTHESIZED=$(echo "$EVENTS" | grep --line-buffered -c "DAG_SYNTHESIZED" || true)
+DAG_SYNTHESIZED=$(count_task_event "$TASK_ID" "DAG_SYNTHESIZED")
 [ "$DAG_SYNTHESIZED" -ge 1 ] || fail "Expected at least 1 DAG_SYNTHESIZED (found $DAG_SYNTHESIZED)"
 log "  DAG_SYNTHESIZED count: $DAG_SYNTHESIZED"
 
-TASK_COMPLETED=$(echo "$EVENTS" | grep --line-buffered -c "TASK_COMPLETED" || true)
+TASK_COMPLETED=$(count_task_event "$TASK_ID" "TASK_COMPLETED")
 [ "$TASK_COMPLETED" -ge 1 ] || fail "Expected at least 1 TASK_COMPLETED (found $TASK_COMPLETED)"
 log "  TASK_COMPLETED count: $TASK_COMPLETED"
 
 for event in WORKFLOW_STARTED SESSION_LOADED TASK_CLASSIFIED DAG_PLANNED USAGE_RECORDED; do
-  COUNT=$(echo "$EVENTS" | grep --line-buffered -c "$event" || true)
+  COUNT=$(count_task_event "$TASK_ID" "$event")
   [ "$COUNT" -ge 1 ] || fail "Missing required event: $event (count=$COUNT)"
   log "  $event count: $COUNT"
 done
 
-log "4. Checking llm_calls..."
-LLM_COUNT=$(psql_cmd "SELECT count(*) FROM llm_calls WHERE task_id='$TASK_ID';" | tr -d ' ')
+# 4. Check event ordering (key ordering checks)
+log "4. Checking event ordering..."
+check_event_ordering "$TASK_ID" "TASK_CREATED" "WORKFLOW_STARTED" || fail "Event ordering: TASK_CREATED should come before WORKFLOW_STARTED"
+check_event_ordering "$TASK_ID" "WORKFLOW_STARTED" "SESSION_LOADED" || fail "Event ordering: WORKFLOW_STARTED should come before SESSION_LOADED"
+check_event_ordering "$TASK_ID" "DAG_PLANNED" "DAG_NODE_STARTED" || fail "Event ordering: DAG_PLANNED should come before DAG_NODE_STARTED"
+check_event_ordering "$TASK_ID" "DAG_NODE_COMPLETED" "DAG_SYNTHESIZED" || fail "Event ordering: DAG_NODE_COMPLETED should come before DAG_SYNTHESIZED"
+check_event_ordering "$TASK_ID" "DAG_SYNTHESIZED" "TASK_COMPLETED" || fail "Event ordering: DAG_SYNTHESIZED should come before TASK_COMPLETED"
+log "  Event ordering: OK"
+
+log "5. Checking llm_calls..."
+LLM_COUNT=$(count_llm_calls "$TASK_ID")
 [ "$LLM_COUNT" -ge 1 ] || fail "Expected at least 1 llm_calls record (found $LLM_COUNT)"
 log "  llm_calls count: $LLM_COUNT"
 
-DRAFT_LLM=$(psql_cmd "SELECT count(*) FROM llm_calls WHERE task_id='$TASK_ID' AND node_id='draft_answer';" | tr -d ' ')
+DRAFT_LLM=$(count_llm_calls_by_node "$TASK_ID" "draft_answer")
 [ "$DRAFT_LLM" -ge 1 ] || fail "Expected at least 1 llm_calls for draft_answer (found $DRAFT_LLM)"
 log "  llm_calls with node_id=draft_answer: $DRAFT_LLM"
 
-ANALYZE_LLM=$(psql_cmd "SELECT count(*) FROM llm_calls WHERE task_id='$TASK_ID' AND node_id='analyze_input';" | tr -d ' ')
+ANALYZE_LLM=$(count_llm_calls_by_node "$TASK_ID" "analyze_input")
 [ "$ANALYZE_LLM" = "0" ] || fail "Expected 0 llm_calls for analyze_input (found $ANALYZE_LLM)"
 log "  llm_calls with node_id=analyze_input: $ANALYZE_LLM"
 
@@ -121,7 +102,6 @@ echo ""
 echo "Summary:"
 echo "  Task ID: $TASK_ID"
 echo "  Status: $STATUS"
-echo "  Result: $RESULT"
 echo "  DAG_NODE_STARTED: $DAG_NODE_STARTED"
 echo "  DAG_NODE_COMPLETED: $DAG_NODE_COMPLETED"
 echo "  LLM_STARTED: $LLM_STARTED"

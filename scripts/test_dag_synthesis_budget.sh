@@ -1,45 +1,21 @@
 #!/bin/bash
 set -euo pipefail
 
-GATEWAY_URL="${GATEWAY_URL:-http://127.0.0.1:8080}"
-REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
-REDIS_PORT="${REDIS_PORT:-6379}"
+# Source common test helpers
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/test_helpers.sh"
 
 log() { echo "[$(date +'%H:%M:%S')] $*"; }
 fail() { echo "[FAIL] $*" >&2; exit 1; }
 
-redis_cmd() {
-  if command -v redis-cli &>/dev/null; then
-    redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" "$@"
-  else
-    docker.exe exec deploy-redis-1 redis-cli "$@"
-  fi
-}
-
-psql_cmd() {
-  docker.exe exec deploy-postgres-1 psql -U admin -d orchestrator -t -c "$1"
-}
-
-wait_task() {
-  local task_id=$1
-  for i in $(seq 1 30); do
-    local status=$(curl --noproxy '*' -s "$GATEWAY_URL/api/v1/tasks/$task_id" | jq -r '.status')
-    if [[ "$status" == "completed" ]] || [[ "$status" == "failed" ]] || [[ "$status" == "budget_exceeded" ]]; then
-      echo "$status"
-      return 0
-    fi
-    sleep 1
-  done
-  fail "Task $task_id timeout"
-}
-
 log "=== DAG Synthesis Budget Smoke Test Starting ==="
 
 log "1. Creating DAG synthesis budget task..."
+# Use a long query to ensure budget check is triggered
 RESP=$(curl --noproxy '*' -s -X POST "$GATEWAY_URL/api/v1/tasks" \
   -H "Content-Type: application/json" \
   -d '{
-    "query": "analyze and synthesize",
+    "query": "analyze and synthesize aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "session_id": "sess-dag-synthesis-budget",
     "config": {
       "mode": "dag",
@@ -55,36 +31,44 @@ TASK_ID=$(echo "$RESP" | jq -r '.task_id')
 
 log "  Task created: $TASK_ID"
 
-STATUS=$(wait_task $TASK_ID)
+STATUS=$(wait_for_task_terminal "$TASK_ID" 30)
 log "  Task status: $STATUS"
 
 [[ "$STATUS" == "budget_exceeded" ]] || [[ "$STATUS" == "failed" ]] || fail "Expected budget_exceeded or failed, got $STATUS"
 
 log "2. Checking error type..."
-ERROR_TYPE=$(curl --noproxy '*' -s "$GATEWAY_URL/api/v1/tasks/$TASK_ID" | jq -r '.error_type')
+ERROR_TYPE=$(get_task_error_type "$TASK_ID")
 log "  Error type: $ERROR_TYPE"
 
 log "3. Checking Redis events for task_id=$TASK_ID..."
-EVENTS=$(redis_cmd XRANGE "task:$TASK_ID:events" - +)
 
-LLM_STARTED=$(echo "$EVENTS" | grep -c "LLM_STARTED" || true)
+# Should NOT have LLM_STARTED for budget exceeded
+LLM_STARTED=$(count_task_event "$TASK_ID" "LLM_STARTED")
 log "  LLM_STARTED count: $LLM_STARTED"
 [ "$LLM_STARTED" = "0" ] || fail "Should not have LLM_STARTED for budget exceeded (found $LLM_STARTED)"
 
-LLM_COMPLETED=$(echo "$EVENTS" | grep -c "LLM_COMPLETED" || true)
+# Should NOT have LLM_COMPLETED for budget exceeded
+LLM_COMPLETED=$(count_task_event "$TASK_ID" "LLM_COMPLETED")
 log "  LLM_COMPLETED count: $LLM_COMPLETED"
 [ "$LLM_COMPLETED" = "0" ] || fail "Should not have LLM_COMPLETED for budget exceeded (found $LLM_COMPLETED)"
 
-DAG_SYNTHESIZED=$(echo "$EVENTS" | grep -c "DAG_SYNTHESIZED" || true)
+# Should NOT have DAG_SYNTHESIZED for budget exceeded
+DAG_SYNTHESIZED=$(count_task_event "$TASK_ID" "DAG_SYNTHESIZED")
 log "  DAG_SYNTHESIZED count: $DAG_SYNTHESIZED"
 [ "$DAG_SYNTHESIZED" = "0" ] || fail "Should not have DAG_SYNTHESIZED for budget exceeded (found $DAG_SYNTHESIZED)"
 
-TASK_BUDGET=$(echo "$EVENTS" | grep -cE "TASK_BUDGET_EXCEEDED|BUDGET_EXCEEDED" || true)
-log "  Budget-related events: $TASK_BUDGET"
-[ "$TASK_BUDGET" -ge 1 ] || fail "Expected budget-related event (found $TASK_BUDGET)"
+# Should NOT have TASK_COMPLETED for budget exceeded
+TASK_COMPLETED=$(count_task_event "$TASK_ID" "TASK_COMPLETED")
+log "  TASK_COMPLETED count: $TASK_COMPLETED"
+[ "$TASK_COMPLETED" = "0" ] || fail "Should not have TASK_COMPLETED for budget exceeded (found $TASK_COMPLETED)"
+
+# Should have TASK_BUDGET_EXCEEDED
+BUDGET=$(count_task_event "$TASK_ID" "TASK_BUDGET_EXCEEDED")
+log "  TASK_BUDGET_EXCEEDED count: $BUDGET"
+[ "$BUDGET" -ge 1 ] || fail "Expected at least 1 TASK_BUDGET_EXCEEDED (found $BUDGET)"
 
 log "4. Checking llm_calls..."
-LLM_COUNT=$(psql_cmd "SELECT count(*) FROM llm_calls WHERE task_id='$TASK_ID';" | tr -d ' ')
+LLM_COUNT=$(count_llm_calls "$TASK_ID")
 log "  llm_calls count: $LLM_COUNT"
 [ "$LLM_COUNT" = "0" ] || fail "Should not have llm_calls for budget exceeded (found $LLM_COUNT)"
 
@@ -98,4 +82,6 @@ echo "  Error type: $ERROR_TYPE"
 echo "  LLM_STARTED: $LLM_STARTED"
 echo "  LLM_COMPLETED: $LLM_COMPLETED"
 echo "  DAG_SYNTHESIZED: $DAG_SYNTHESIZED"
+echo "  TASK_COMPLETED: $TASK_COMPLETED"
+echo "  TASK_BUDGET_EXCEEDED: $BUDGET"
 echo "  llm_calls: $LLM_COUNT"

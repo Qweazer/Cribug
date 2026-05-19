@@ -1,39 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
-GATEWAY_URL="${GATEWAY_URL:-http://127.0.0.1:8080}"
-REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
-REDIS_PORT="${REDIS_PORT:-6379}"
+# Source common test helpers
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/test_helpers.sh"
 
 log() { echo "[$(date +'%H:%M:%S')] $*"; }
 fail() { echo "[FAIL] $*" >&2; exit 1; }
-
-# Helper to run redis-cli
-redis_cmd() {
-  if command -v redis-cli &>/dev/null; then
-    redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" "$@"
-  else
-    docker.exe exec deploy-redis-1 redis-cli "$@"
-  fi
-}
-
-# Helper to run psql
-psql_cmd() {
-  docker.exe exec deploy-postgres-1 psql -U admin -d orchestrator -t -c "$1"
-}
-
-wait_task() {
-  local task_id=$1
-  for i in $(seq 1 60); do
-    local status=$(curl --noproxy '*' -s "$GATEWAY_URL/api/v1/tasks/$task_id" | jq -r '.status')
-    if [[ "$status" == "completed" ]] || [[ "$status" == "failed" ]] || [[ "$status" == "budget_exceeded" ]]; then
-      echo "$status"
-      return 0
-    fi
-    sleep 1
-  done
-  fail "Task $task_id timeout"
-}
 
 log "=== DAG LLM Execution Smoke Test Starting ==="
 
@@ -59,68 +32,61 @@ TASK_ID=$(echo "$RESP" | jq -r '.task_id')
 log "  Task created: $TASK_ID"
 
 # Poll until completed
-STATUS=$(wait_task $TASK_ID)
+STATUS=$(wait_for_task_terminal "$TASK_ID")
 [ "$STATUS" = "completed" ] || fail "DAG task expected completed, got $STATUS"
 log "  Task completed: $STATUS"
 
-# Wait for events to be fully written to Redis (race condition fix)
+# Wait for events to be fully written to Redis
 sleep 2
 
-# 2. Verify result contains LLM execution info
+# 2. Verify result contains mock answer
 log "2. Checking result..."
-RESULT=$(curl --noproxy '*' -s "$GATEWAY_URL/api/v1/tasks/$TASK_ID" | jq -r '.result')
-# 4.6+: result now contains synthesized output (LLM mock answer)
-echo "$RESULT" | grep -q "mock answer" || fail "Result does not contain 'mock answer': $RESULT"
-log "  Result: $RESULT"
+RESULT=$(get_task_result "$TASK_ID")
+echo "$RESULT" | grep -q "mock answer" || fail "Result does not contain mock answer: $RESULT"
+log "  Result: OK (mock answer present)"
 
 # 3. Verify Redis events for this task_id
 log "3. Checking Redis events for task_id=$TASK_ID..."
 
-# Get all events for this task
-EVENTS=$(redis_cmd XRANGE "task:$TASK_ID:events" - +)
-EVENT_COUNT=$(echo "$EVENTS" | wc -l)
-log "  Total events: $EVENT_COUNT"
-
-# Count DAG_NODE_STARTED
-DAG_NODE_STARTED=$(echo "$EVENTS" | grep --line-buffered -c "DAG_NODE_STARTED" || true)
+# Count DAG node events (should be 2)
+DAG_NODE_STARTED=$(count_task_event "$TASK_ID" "DAG_NODE_STARTED")
 log "  DAG_NODE_STARTED count: $DAG_NODE_STARTED"
 [ "$DAG_NODE_STARTED" -ge 2 ] || fail "Expected at least 2 DAG_NODE_STARTED (found $DAG_NODE_STARTED)"
 
-# Count DAG_NODE_COMPLETED
-DAG_NODE_COMPLETED=$(echo "$EVENTS" | grep --line-buffered -c "DAG_NODE_COMPLETED" || true)
+DAG_NODE_COMPLETED=$(count_task_event "$TASK_ID" "DAG_NODE_COMPLETED")
 log "  DAG_NODE_COMPLETED count: $DAG_NODE_COMPLETED"
 [ "$DAG_NODE_COMPLETED" -ge 2 ] || fail "Expected at least 2 DAG_NODE_COMPLETED (found $DAG_NODE_COMPLETED)"
 
-# Count LLM_STARTED
-LLM_STARTED=$(echo "$EVENTS" | grep --line-buffered -c "LLM_STARTED" || true)
+# Count LLM events (should be 1)
+LLM_STARTED=$(count_task_event "$TASK_ID" "LLM_STARTED")
 log "  LLM_STARTED count: $LLM_STARTED"
 [ "$LLM_STARTED" -ge 1 ] || fail "Expected at least 1 LLM_STARTED (found $LLM_STARTED)"
 
-# Count LLM_COMPLETED
-LLM_COMPLETED=$(echo "$EVENTS" | grep --line-buffered -c "LLM_COMPLETED" || true)
+LLM_COMPLETED=$(count_task_event "$TASK_ID" "LLM_COMPLETED")
 log "  LLM_COMPLETED count: $LLM_COMPLETED"
 [ "$LLM_COMPLETED" -ge 1 ] || fail "Expected at least 1 LLM_COMPLETED (found $LLM_COMPLETED)"
 
-# Verify required non-LLM events
-for event in WORKFLOW_STARTED SESSION_LOADED TASK_CLASSIFIED DAG_PLANNED USAGE_RECORDED TASK_COMPLETED; do
-  COUNT=$(echo "$EVENTS" | grep --line-buffered -c "$event" || true)
-  [ "$COUNT" -ge 1 ] || fail "Missing required event: $event (count=$COUNT)"
-  log "  $event count: $COUNT"
+# Verify required events exist
+log "4. Checking required events..."
+for event in WORKFLOW_STARTED SESSION_LOADED TASK_CLASSIFIED DAG_PLANNED USAGE_RECORDED TASK_COMPLETED DAG_SYNTHESIZED; do
+  count=$(count_task_event "$TASK_ID" "$event")
+  [ "$count" -ge 1 ] || fail "Missing required event: $event (count=$count)"
+  log "  $event count: $count"
 done
 
-# 4. Verify llm_calls records
-log "4. Checking llm_calls for task_id=$TASK_ID..."
-LLM_COUNT=$(psql_cmd "SELECT count(*) FROM llm_calls WHERE task_id='$TASK_ID';" | tr -d ' ')
+# 5. Verify llm_calls records
+log "5. Checking llm_calls for task_id=$TASK_ID..."
+LLM_COUNT=$(count_llm_calls "$TASK_ID")
 log "  llm_calls total count: $LLM_COUNT"
 [ "$LLM_COUNT" -ge 1 ] || fail "Expected at least 1 llm_calls record (found $LLM_COUNT)"
 
 # Check node_id='draft_answer' has 1 record
-DRAFT_LLM=$(psql_cmd "SELECT count(*) FROM llm_calls WHERE task_id='$TASK_ID' AND node_id='draft_answer';" | tr -d ' ')
+DRAFT_LLM=$(count_llm_calls_by_node "$TASK_ID" "draft_answer")
 log "  llm_calls with node_id=draft_answer: $DRAFT_LLM"
 [ "$DRAFT_LLM" -ge 1 ] || fail "Expected at least 1 llm_calls for draft_answer (found $DRAFT_LLM)"
 
 # Check analyze_input has 0 records
-ANALYZE_LLM=$(psql_cmd "SELECT count(*) FROM llm_calls WHERE task_id='$TASK_ID' AND node_id='analyze_input';" | tr -d ' ')
+ANALYZE_LLM=$(count_llm_calls_by_node "$TASK_ID" "analyze_input")
 log "  llm_calls with node_id=analyze_input: $ANALYZE_LLM"
 [ "$ANALYZE_LLM" = "0" ] || fail "Expected 0 llm_calls for analyze_input (found $ANALYZE_LLM)"
 
@@ -130,11 +96,11 @@ echo ""
 echo "Summary:"
 echo "  Task ID: $TASK_ID"
 echo "  Status: $STATUS"
-echo "  Result: $RESULT"
 echo "  DAG_NODE_STARTED: $DAG_NODE_STARTED"
 echo "  DAG_NODE_COMPLETED: $DAG_NODE_COMPLETED"
 echo "  LLM_STARTED: $LLM_STARTED"
 echo "  LLM_COMPLETED: $LLM_COMPLETED"
+echo "  DAG_SYNTHESIZED: $(count_task_event "$TASK_ID" "DAG_SYNTHESIZED")"
 echo "  llm_calls total: $LLM_COUNT"
 echo "  llm_calls draft_answer: $DRAFT_LLM"
 echo "  llm_calls analyze_input: $ANALYZE_LLM"

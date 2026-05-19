@@ -162,6 +162,19 @@ func (a *DAGActivities) ExecuteDAGNode(ctx context.Context, input ExecuteDAGNode
 		"node_type", input.Node.Type,
 		"use_llm", input.Node.UseLLM)
 
+	// Debug hook: force node failure for testing
+	if strings.Contains(input.Query, "__force_dag_node_failure__") {
+		result := &types.DAGNodeResult{
+			TaskID:   input.TaskID,
+			NodeID:   input.Node.ID,
+			NodeType: input.Node.Type,
+			Status:   "failed",
+			Error:    "debug: forced node failure for testing",
+		}
+		logger.Warn("ExecuteDAGNodeActivity: debug forced failure", "task_id", input.TaskID, "node_id", input.Node.ID)
+		return &ExecuteDAGNodeOutput{Result: result}, nil
+	}
+
 	// Mock node (no LLM)
 	if !input.Node.UseLLM {
 		var output string
