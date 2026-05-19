@@ -46,7 +46,7 @@ func main() {
 	sessionActivities := activities.NewSessionActivities(redisClient)
 	budgetActivities := activities.NewBudgetActivities()
 	usageActivities := activities.NewUsageActivities(dbClient.Stdlib())
-	dagActivities := activities.NewDAGActivities()
+	dagActivities := activities.NewDAGActivities(dbClient.Stdlib(), cfg.LLMServiceURL)
 
 	w := worker.New(temporalClient, cfg.TemporalTaskQueue, worker.Options{})
 
@@ -71,6 +71,7 @@ func main() {
 	w.RegisterActivityWithOptions(dagActivities.ClassifyTask, activity.RegisterOptions{Name: "ClassifyTaskActivity"})
 	w.RegisterActivityWithOptions(dagActivities.PlanDAG, activity.RegisterOptions{Name: "PlanDAGActivity"})
 	w.RegisterActivityWithOptions(dagActivities.ExecuteDAGNode, activity.RegisterOptions{Name: "ExecuteDAGNodeActivity"})
+	w.RegisterActivityWithOptions(dagActivities.RecordDAGNodeUsage, activity.RegisterOptions{Name: "RecordDAGNodeUsageActivity"})
 
 	log.Printf("worker started, task_queue=%s", cfg.TemporalTaskQueue)
 	if err := w.Run(worker.InterruptCh()); err != nil {

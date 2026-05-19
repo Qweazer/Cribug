@@ -21,6 +21,7 @@ type DAGNode struct {
 	Name      string   `json:"name"`
 	Input     string   `json:"input"`
 	DependsOn []string `json:"depends_on"`
+	UseLLM   bool     `json:"use_llm"`   // whether this node should call LLM
 }
 
 type DAGEdge struct {

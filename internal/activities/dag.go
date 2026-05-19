@@ -2,23 +2,33 @@ package activities
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
+	"log"
 	"strings"
 
+	"cribug/internal/llm"
 	"cribug/internal/types"
 
 	"go.temporal.io/sdk/activity"
 )
 
-type DAGActivities struct{}
+type DAGActivities struct {
+	db           *sql.DB
+	llmClient   *llm.Client
+}
 
-func NewDAGActivities() *DAGActivities {
-	return &DAGActivities{}
+func NewDAGActivities(db *sql.DB, llmServiceURL string) *DAGActivities {
+	return &DAGActivities{
+		db:         db,
+		llmClient: llm.NewClient(llmServiceURL),
+	}
 }
 
 type ClassifyTaskInput struct {
-	TaskID        string
-	Query         string
-	EnableTools   bool
+	TaskID      string
+	Query       string
+	EnableTools bool
 }
 
 type ClassifyTaskOutput struct {
@@ -80,8 +90,8 @@ func (a *DAGActivities) ClassifyTask(ctx context.Context, input ClassifyTaskInpu
 }
 
 type PlanDAGInput struct {
-	TaskID        string
-	Query         string
+	TaskID         string
+	Query          string
 	Classification *types.TaskClassification
 }
 
@@ -93,7 +103,7 @@ func (a *DAGActivities) PlanDAG(ctx context.Context, input PlanDAGInput) (*PlanD
 	logger := activity.GetLogger(ctx)
 	logger.Info("PlanDAGActivity started", "task_id", input.TaskID)
 
-	// Always generate minimal 2-node DAG
+	// Generate 2-node DAG: analyze_input (mock) -> draft_answer (LLM)
 	plan := &types.DAGPlan{
 		TaskID: input.TaskID,
 		Nodes: []types.DAGNode{
@@ -103,6 +113,7 @@ func (a *DAGActivities) PlanDAG(ctx context.Context, input PlanDAGInput) (*PlanD
 				Name:      "Analyze Input",
 				Input:     input.Query,
 				DependsOn: []string{},
+				UseLLM:    false, // mock node
 			},
 			{
 				ID:        "draft_answer",
@@ -110,6 +121,7 @@ func (a *DAGActivities) PlanDAG(ctx context.Context, input PlanDAGInput) (*PlanD
 				Name:      "Draft Answer",
 				Input:     "Synthesize analysis into answer",
 				DependsOn: []string{"analyze_input"},
+				UseLLM:    true, // LLM-backed node
 			},
 		},
 		Edges: []types.DAGEdge{
@@ -127,13 +139,19 @@ func (a *DAGActivities) PlanDAG(ctx context.Context, input PlanDAGInput) (*PlanD
 
 type ExecuteDAGNodeInput struct {
 	TaskID          string
+	WorkflowID      string
+	RunID           string
 	Query           string
 	Node            types.DAGNode
 	UpstreamResults map[string]types.DAGNodeResult
+	Model           string
+	Temperature     float64
+	MaxTokens       int
 }
 
 type ExecuteDAGNodeOutput struct {
 	Result *types.DAGNodeResult
+	Usage  *types.Usage // LLM usage if node called LLM
 }
 
 func (a *DAGActivities) ExecuteDAGNode(ctx context.Context, input ExecuteDAGNodeInput) (*ExecuteDAGNodeOutput, error) {
@@ -141,25 +159,84 @@ func (a *DAGActivities) ExecuteDAGNode(ctx context.Context, input ExecuteDAGNode
 	logger.Info("ExecuteDAGNodeActivity started",
 		"task_id", input.TaskID,
 		"node_id", input.Node.ID,
-		"node_type", input.Node.Type)
+		"node_type", input.Node.Type,
+		"use_llm", input.Node.UseLLM)
 
-	var output string
+	// Mock node (no LLM)
+	if !input.Node.UseLLM {
+		var output string
+		switch input.Node.Type {
+		case "analysis":
+			output = "analyzed input for task " + input.TaskID
+		default:
+			output = "executed mock node " + input.Node.ID
+		}
 
-	switch input.Node.Type {
-	case "analysis":
-		output = "analyzed input for task " + input.TaskID
-	case "synthesis":
-		// Build context from upstream results
-		upstreamContext := ""
-		for nodeID, result := range input.UpstreamResults {
-			upstreamContext += nodeID + ": " + result.Output + "; "
+		result := &types.DAGNodeResult{
+			TaskID:   input.TaskID,
+			NodeID:   input.Node.ID,
+			NodeType: input.Node.Type,
+			Status:   "completed",
+			Output:   output,
 		}
-		if upstreamContext == "" {
-			upstreamContext = "no upstream results"
+
+		logger.Info("ExecuteDAGNodeActivity completed (mock)",
+			"task_id", input.TaskID,
+			"node_id", input.Node.ID,
+			"status", result.Status)
+
+		return &ExecuteDAGNodeOutput{Result: result}, nil
+	}
+
+	// LLM-backed node
+	if a.llmClient == nil {
+		return nil, fmt.Errorf("llm client not initialized")
+	}
+
+	// Build prompt from upstream results
+	upstreamContext := ""
+	for nodeID, result := range input.UpstreamResults {
+		upstreamContext += fmt.Sprintf("[%s] %s\n", nodeID, result.Output)
+	}
+	if upstreamContext == "" {
+		upstreamContext = "No upstream analysis available."
+	}
+
+	// Build LLM prompt
+	prompt := fmt.Sprintf(`You are working on a DAG task.
+
+Original query: %s
+
+Upstream node results:
+%s
+
+Task: Complete the "%s" node (type: %s) by providing your output.
+
+Output your answer directly:`, input.Query, upstreamContext, input.Node.Name, input.Node.Type)
+
+	messages := []types.LLMMessage{
+		{Role: "user", Content: prompt},
+	}
+
+	resp, err := a.llmClient.Call(ctx, llm.CallRequest{
+		TraceID:             input.TaskID,
+		TaskID:              input.TaskID,
+		Provider:            "openai_compatible",
+		Model:               input.Model,
+		Messages:            messages,
+		Temperature:         input.Temperature,
+		MaxCompletionTokens: input.MaxTokens,
+	})
+
+	if err != nil {
+		result := &types.DAGNodeResult{
+			TaskID:   input.TaskID,
+			NodeID:   input.Node.ID,
+			NodeType: input.Node.Type,
+			Status:   "failed",
+			Error:    err.Error(),
 		}
-		output = "drafted answer from DAG node results: " + upstreamContext
-	default:
-		output = "executed node " + input.Node.ID
+		return &ExecuteDAGNodeOutput{Result: result}, nil
 	}
 
 	result := &types.DAGNodeResult{
@@ -167,13 +244,86 @@ func (a *DAGActivities) ExecuteDAGNode(ctx context.Context, input ExecuteDAGNode
 		NodeID:   input.Node.ID,
 		NodeType: input.Node.Type,
 		Status:   "completed",
-		Output:   output,
+		Output:   resp.Content,
 	}
 
-	logger.Info("ExecuteDAGNodeActivity completed",
+	logger.Info("ExecuteDAGNodeActivity completed (LLM)",
 		"task_id", input.TaskID,
 		"node_id", input.Node.ID,
-		"status", result.Status)
+		"status", result.Status,
+		"tokens", resp.Usage.TotalTokens)
 
-	return &ExecuteDAGNodeOutput{Result: result}, nil
+	return &ExecuteDAGNodeOutput{
+		Result: result,
+		Usage:  &resp.Usage,
+	}, nil
+}
+
+// RecordDAGNodeUsage records LLM usage for a DAG node
+type RecordDAGNodeUsageInput struct {
+	TaskID            string
+	WorkflowID        string
+	RunID             string
+	NodeID            string
+	Model             string
+	Provider          string
+	PromptTokens      int
+	CompletionTokens  int
+	TotalTokens       int
+	LatencyMS         int64
+	FinishReason      string
+}
+
+func (a *DAGActivities) RecordDAGNodeUsage(ctx context.Context, input RecordDAGNodeUsageInput) error {
+	logger := activity.GetLogger(ctx)
+	logger.Info("RecordDAGNodeUsage started",
+		"task_id", input.TaskID,
+		"node_id", input.NodeID,
+		"total_tokens", input.TotalTokens)
+
+	// call_id includes node_id for idempotency
+	callID := fmt.Sprintf("%s:%s", input.TaskID, input.NodeID)
+
+	query := `
+		INSERT INTO llm_calls (
+			id, call_id, task_id, workflow_id, run_id, node_id, provider, model,
+			prompt_tokens, completion_tokens, total_tokens,
+			latency_ms, finish_reason, created_at
+		) VALUES (
+			gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7,
+			$8, $9, $10, $11, $12, NOW()
+		)
+		ON CONFLICT (call_id) DO UPDATE SET
+			prompt_tokens = EXCLUDED.prompt_tokens,
+			completion_tokens = EXCLUDED.completion_tokens,
+			total_tokens = EXCLUDED.total_tokens,
+			latency_ms = EXCLUDED.latency_ms,
+			finish_reason = EXCLUDED.finish_reason
+		RETURNING id`
+
+	var id string
+	err := a.db.QueryRowContext(ctx, query,
+		callID,
+		input.TaskID,
+		input.WorkflowID,
+		input.RunID,
+		input.NodeID,
+		input.Provider,
+		input.Model,
+		input.PromptTokens,
+		input.CompletionTokens,
+		input.TotalTokens,
+		input.LatencyMS,
+		input.FinishReason,
+	).Scan(&id)
+
+	if err != nil {
+		logger.Error("RecordDAGNodeUsage failed", "error", err)
+		return fmt.Errorf("insert llm_calls: %w", err)
+	}
+
+	log.Printf("[INFO] RecordDAGNodeUsage: task=%s node=%s id=%s tokens=%d",
+		input.TaskID, input.NodeID, id, input.TotalTokens)
+	logger.Info("RecordDAGNodeUsage completed", "task_id", input.TaskID, "node_id", input.NodeID)
+	return nil
 }

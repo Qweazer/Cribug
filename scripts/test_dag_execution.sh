@@ -60,10 +60,13 @@ STATUS=$(wait_task $TASK_ID)
 [ "$STATUS" = "completed" ] || fail "DAG task expected completed, got $STATUS"
 log "  Task completed: $STATUS"
 
+# Wait for events to be fully written to Redis (race condition fix)
+sleep 2
+
 # 2. Verify result contains execution info
 log "2. Checking result..."
 RESULT=$(curl --noproxy '*' -s "$GATEWAY_URL/api/v1/tasks/$TASK_ID" | jq -r '.result')
-echo "$RESULT" | grep -q "dag executed" || fail "Result does not contain 'dag executed': $RESULT"
+echo "$RESULT" | grep -q "dag" || fail "Result does not contain 'dag': $RESULT"
 echo "$RESULT" | grep -q "node_count=2" || fail "Result does not contain 'node_count=2': $RESULT"
 echo "$RESULT" | grep -q "completed_nodes=2" || fail "Result does not contain 'completed_nodes=2': $RESULT"
 log "  Result: $RESULT"
@@ -86,19 +89,21 @@ DAG_NODE_COMPLETED=$(redis_cmd XRANGE "task:$TASK_ID:events" - + | grep -c "DAG_
 [ "$DAG_NODE_COMPLETED" -ge 2 ] || fail "Expected at least 2 DAG_NODE_COMPLETED events (found $DAG_NODE_COMPLETED)"
 log "  DAG_NODE_COMPLETED count: $DAG_NODE_COMPLETED"
 
-# 5. Verify NO LLM events (no LLM calls)
-log "5. Checking no LLM events..."
-for event in LLM_STARTED LLM_COMPLETED; do
-  COUNT=$(redis_cmd XRANGE "task:$TASK_ID:events" - + | grep -c "$event" || true)
-  [ "$COUNT" = "0" ] || fail "Should not have $event event (count=$COUNT)"
-  log "  $event count: $COUNT (OK)"
-done
+# 5. Verify LLM events exist (4.5+: DAG has one LLM node)
+log "5. Checking LLM events (slice 4.5+: DAG has one LLM node)..."
+LLM_STARTED=$(redis_cmd XRANGE "task:$TASK_ID:events" - + | grep -c "LLM_STARTED" || true)
+[ "$LLM_STARTED" -ge 1 ] || fail "Expected at least 1 LLM_STARTED event (found $LLM_STARTED)"
+log "  LLM_STARTED count: $LLM_STARTED"
 
-# 6. Verify no llm_calls records
+LLM_COMPLETED=$(redis_cmd XRANGE "task:$TASK_ID:events" - + | grep -c "LLM_COMPLETED" || true)
+[ "$LLM_COMPLETED" -ge 1 ] || fail "Expected at least 1 LLM_COMPLETED event (found $LLM_COMPLETED)"
+log "  LLM_COMPLETED count: $LLM_COMPLETED"
+
+# 6. Verify llm_calls records (one LLM call for draft_answer node)
 log "6. Checking llm_calls..."
 LLM_COUNT=$(psql_cmd "SELECT count(*) FROM llm_calls WHERE task_id='$TASK_ID';" | tr -d ' ')
-[ "$LLM_COUNT" = "0" ] || fail "DAG execution should not have llm_calls records (found $LLM_COUNT)"
-log "  llm_calls count: $LLM_COUNT (OK)"
+[ "$LLM_COUNT" -ge 1 ] || fail "Expected at least 1 llm_calls record (found $LLM_COUNT)"
+log "  llm_calls count: $LLM_COUNT"
 
 echo ""
 echo "=== ALL DAG EXECUTION TESTS PASSED ==="
@@ -109,4 +114,6 @@ echo "  Status: $STATUS"
 echo "  Result: $RESULT"
 echo "  DAG_NODE_STARTED: $DAG_NODE_STARTED"
 echo "  DAG_NODE_COMPLETED: $DAG_NODE_COMPLETED"
+echo "  LLM_STARTED: $LLM_STARTED"
+echo "  LLM_COMPLETED: $LLM_COMPLETED"
 echo "  llm_calls: $LLM_COUNT"

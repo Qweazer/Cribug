@@ -60,7 +60,59 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 		Event:  events.NewSessionLoadedEvent(req.TaskID, sessionOutput.MessageCount),
 	}).Get(ctx, nil)
 
-	// 4. ClassifyTaskActivity
+	// 4. EstimatePromptTokensActivity for budget check
+	var estOutput *activities.EstimatePromptTokensOutput
+	err = workflow.ExecuteActivity(ctx, "EstimatePromptTokensActivity", activities.EstimatePromptTokensInput{
+		Model: req.Model,
+		Text:  req.Query,
+	}).Get(ctx, &estOutput)
+	if err != nil {
+		logger.Error("EstimatePromptTokensActivity failed", "error", err)
+	}
+
+	// 5. CheckBudgetActivity
+	var budgetOutput *activities.CheckBudgetOutput
+	err = workflow.ExecuteActivity(ctx, "CheckBudgetActivity", activities.CheckBudgetInput{
+		EstimatedPromptTokens: estOutput.EstimatedPromptTokens,
+		MaxTotalTokens:        req.MaxTotalTokens,
+		MaxCompletionTokens:   req.MaxCompletionTokens,
+	}).Get(ctx, &budgetOutput)
+	if err != nil {
+		logger.Error("CheckBudgetActivity failed", "error", err)
+	}
+
+	// 6. If budget not allowed, return budget_exceeded
+	if !budgetOutput.Allowed {
+		logger.Warn("Budget exceeded in DAGWorkflow", "reason", budgetOutput.Reason)
+
+		workflow.ExecuteActivity(ctx, "SaveFailureActivity", activities.SaveFailureInput{
+			TaskID:    req.TaskID,
+			ErrorType: types.TaskStatusBudgetExceeded,
+			ErrorMsg:  budgetOutput.Reason,
+		}).Get(ctx, nil)
+
+		workflow.ExecuteActivity(ctx, "RecordExecutionFailedActivity", activities.RecordExecutionFailedInput{
+			TaskID:     req.TaskID,
+			WorkflowID: req.WorkflowID,
+			RunID:      req.RunID,
+			ErrorType:  types.TaskStatusBudgetExceeded,
+			ErrorMsg:   budgetOutput.Reason,
+		}).Get(ctx, nil)
+
+		workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+			TaskID: req.TaskID,
+			Event:  events.NewTaskBudgetExceededEvent(req.TaskID, budgetOutput.Reason, estOutput.EstimatedPromptTokens, req.MaxTotalTokens),
+		}).Get(ctx, nil)
+
+		return &types.WorkflowTaskResult{
+			TaskID: req.TaskID,
+			Status: types.TaskStatusBudgetExceeded,
+			Answer: "",
+			Error:  budgetOutput.Reason,
+		}, nil
+	}
+
+	// 7. ClassifyTaskActivity
 	var classifyOutput *activities.ClassifyTaskOutput
 	err = workflow.ExecuteActivity(ctx, "ClassifyTaskActivity", activities.ClassifyTaskInput{
 		TaskID:      req.TaskID,
@@ -73,13 +125,13 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 
 	classification := classifyOutput.Classification
 
-	// 5. Emit TASK_CLASSIFIED event
+	// 8. Emit TASK_CLASSIFIED event
 	workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 		TaskID: req.TaskID,
 		Event:  events.NewTaskClassifiedEvent(req.TaskID, classification.Category, classification.Complexity, classification.RequiresTools),
 	}).Get(ctx, nil)
 
-	// 6. PlanDAGActivity
+	// 9. PlanDAGActivity
 	var planOutput *activities.PlanDAGOutput
 	err = workflow.ExecuteActivity(ctx, "PlanDAGActivity", activities.PlanDAGInput{
 		TaskID:         req.TaskID,
@@ -92,18 +144,20 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 
 	plan := planOutput.Plan
 
-	// 7. Emit DAG_PLANNED event
+	// 10. Emit DAG_PLANNED event
 	workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 		TaskID: req.TaskID,
 		Event:  events.NewDAGPlannedEvent(req.TaskID, len(plan.Nodes), len(plan.Edges)),
 	}).Get(ctx, nil)
 
-	// 8. Execute DAG nodes in order
+	// 11. Execute DAG nodes in order
 	nodeResults := make(map[string]types.DAGNodeResult)
 	completedNodes := 0
+	llmNodes := 0
+	totalTokens := 0
 
 	for _, node := range plan.Nodes {
-		logger.Info("Executing DAG node", "node_id", node.ID, "depends_on", node.DependsOn)
+		logger.Info("Executing DAG node", "node_id", node.ID, "use_llm", node.UseLLM)
 
 		// Emit DAG_NODE_STARTED
 		workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
@@ -119,17 +173,30 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 			}
 		}
 
+		// If LLM node, emit LLM_STARTED
+		if node.UseLLM {
+			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+				TaskID: req.TaskID,
+				Event:  events.NewLLMStartedEvent(req.TaskID, req.Model),
+			}).Get(ctx, nil)
+		}
+
 		// Execute the node
 		var nodeOutput *activities.ExecuteDAGNodeOutput
 		err = workflow.ExecuteActivity(ctx, "ExecuteDAGNodeActivity", activities.ExecuteDAGNodeInput{
 			TaskID:          req.TaskID,
+			WorkflowID:       req.WorkflowID,
+			RunID:           req.RunID,
 			Query:           req.Query,
 			Node:            node,
 			UpstreamResults: upstreamResults,
+			Model:           req.Model,
+			Temperature:     req.Temperature,
+			MaxTokens:       req.MaxCompletionTokens,
 		}).Get(ctx, &nodeOutput)
+
 		if err != nil {
 			logger.Error("ExecuteDAGNodeActivity failed", "node_id", node.ID, "error", err)
-			// Continue with failed node result
 			nodeResults[node.ID] = types.DAGNodeResult{
 				TaskID:   req.TaskID,
 				NodeID:   node.ID,
@@ -139,7 +206,48 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 			}
 		} else {
 			nodeResults[node.ID] = *nodeOutput.Result
-			completedNodes++
+
+			// If LLM node, record usage and emit LLM_COMPLETED
+			if node.UseLLM && nodeOutput.Usage != nil {
+				llmNodes++
+				totalTokens += nodeOutput.Usage.TotalTokens
+
+				finishReason := "stop"
+				if nodeOutput.Result.Error != "" {
+					finishReason = "error"
+				}
+
+				// Record LLM usage for node
+				workflow.ExecuteActivity(ctx, "RecordDAGNodeUsageActivity", activities.RecordDAGNodeUsageInput{
+					TaskID:           req.TaskID,
+					WorkflowID:       req.WorkflowID,
+					RunID:            req.RunID,
+					NodeID:           node.ID,
+					Model:            req.Model,
+					Provider:         "openai_compatible",
+					PromptTokens:     nodeOutput.Usage.PromptTokens,
+					CompletionTokens: nodeOutput.Usage.CompletionTokens,
+					TotalTokens:      nodeOutput.Usage.TotalTokens,
+					LatencyMS:        0, // not tracked per-node
+					FinishReason:     finishReason,
+				}).Get(ctx, nil)
+
+				// Emit LLM_COMPLETED
+				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+					TaskID: req.TaskID,
+					Event:  events.NewLLMCompletedEvent(req.TaskID, req.Model, finishReason, 0),
+				}).Get(ctx, nil)
+
+				// Emit USAGE_RECORDED
+				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+					TaskID: req.TaskID,
+					Event:  events.NewUsageRecordedEvent(req.TaskID, totalTokens),
+				}).Get(ctx, nil)
+			}
+
+			if nodeOutput.Result.Status == "completed" {
+				completedNodes++
+			}
 		}
 
 		// Emit DAG_NODE_COMPLETED
@@ -156,8 +264,8 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 	}
 
 	// 9. Build result with execution info
-	result := fmt.Sprintf("dag executed: category=%s, node_count=%d, completed_nodes=%d",
-		classification.Category, len(plan.Nodes), completedNodes)
+	result := fmt.Sprintf("dag llm executed: category=%s, node_count=%d, completed_nodes=%d, llm_nodes=%d, total_tokens=%d",
+		classification.Category, len(plan.Nodes), completedNodes, llmNodes, totalTokens)
 
 	err = workflow.ExecuteActivity(ctx, "SaveResultActivity", activities.SaveResultInput{
 		TaskID: req.TaskID,
@@ -204,7 +312,7 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 		Event:  events.NewTaskCompletedEvent(req.TaskID, req.WorkflowID),
 	}).Get(ctx, nil)
 
-	logger.Info("DAGWorkflow execution completed", "task_id", req.TaskID, "result", result)
+	logger.Info("DAGWorkflow LLM execution completed", "task_id", req.TaskID, "result", result)
 	return &types.WorkflowTaskResult{
 		TaskID: req.TaskID,
 		Status: types.TaskStatusCompleted,
