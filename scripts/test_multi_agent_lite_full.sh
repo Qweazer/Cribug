@@ -30,9 +30,9 @@ run_test() {
 log "Multi-Agent Lite Full Test Suite Starting"
 
 # Run all multi-agent tests in order
-# Slice 5.1: Skeleton (planner/researcher/critic mock, synthesizer LLM-backed)
+# Slice 5.1: Skeleton (planner mock, researcher+critic+synthesizer LLM-backed)
 run_test "$SCRIPT_DIR/test_multi_agent_skeleton.sh"
-# Slice 5.2: LLM execution test (synthesizer only)
+# Slice 5.2: LLM execution test (synthesizer)
 run_test "$SCRIPT_DIR/test_multi_agent_llm_execution.sh"
 # Slice 5.2: Budget protection test (synthesizer)
 run_test "$SCRIPT_DIR/test_multi_agent_llm_budget.sh"
@@ -43,6 +43,11 @@ run_test "$SCRIPT_DIR/test_multi_agent_failure.sh"
 run_test "$SCRIPT_DIR/test_multi_agent_critic_llm_execution.sh"
 # Slice 5.3: Critic budget test
 run_test "$SCRIPT_DIR/test_multi_agent_critic_budget.sh"
+
+# Slice 5.4: Researcher LLM execution test
+run_test "$SCRIPT_DIR/test_multi_agent_researcher_llm_execution.sh"
+# Slice 5.4: Researcher budget test
+run_test "$SCRIPT_DIR/test_multi_agent_researcher_budget.sh"
 
 echo ""
 echo "========================================"

@@ -93,3 +93,25 @@ type RunCriticAgentOutput struct {
 	TotalTokens     int
 	LatencyMS       int64
 }
+
+// RunResearcherAgentInput is the input for researcher agent (LLM-backed)
+type RunResearcherAgentInput struct {
+	TaskID               string
+	WorkflowID           string
+	RunID                string
+	Query                string
+	Model                string
+	Temperature          float64
+	MaxCompletionTokens  int
+	PlannerOutput        string
+}
+
+// RunResearcherAgentOutput is the output from researcher agent
+type RunResearcherAgentOutput struct {
+	Step       AgentStep
+	LLMOutput  string
+	PromptTokens    int
+	CompletionTokens int
+	TotalTokens     int
+	LatencyMS       int64
+}

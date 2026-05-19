@@ -62,7 +62,7 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 	}).Get(ctx, nil)
 
 	// Track outputs from each agent
-	var plannerOutput, researcherOutput string
+	var plannerOutput string
 
 	// 4. Execute planner (mock)
 	logger.Info("Executing planner (mock)")
@@ -96,40 +96,8 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 	}
 	logger.Info("Planner completed", "output_length", len(plannerOutput))
 
-	// 5. Execute researcher (mock)
-	logger.Info("Executing researcher (mock)")
-	err = workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
-		TaskID: req.TaskID,
-		Event:  events.NewAgentStartedEvent(req.TaskID, string(types.AgentRoleResearcher), 2),
-	}).Get(ctx, nil)
-	if err != nil {
-		logger.Error("EmitEventActivity (AGENT_STARTED researcher) failed", "error", err)
-	}
-
-	var researcherAgentOutput *types.RunAgentActivityOutput
-	err = workflow.ExecuteActivity(ctx, "RunAgentActivity", types.RunAgentActivityInput{
-		TaskID: req.TaskID,
-		Role:   types.AgentRoleResearcher,
-		Query:  req.Query,
-	}).Get(ctx, &researcherAgentOutput)
-	if err != nil {
-		logger.Error("RunAgentActivity (researcher) failed", "error", err)
-		mw.emitFailure(ctx, req, err, "researcher")
-		return nil, err
-	}
-	researcherOutput = researcherAgentOutput.Step.Output
-
-	err = workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
-		TaskID: req.TaskID,
-		Event:  events.NewAgentCompletedEvent(req.TaskID, string(types.AgentRoleResearcher), "completed", researcherOutput),
-	}).Get(ctx, nil)
-	if err != nil {
-		logger.Error("EmitEventActivity (AGENT_COMPLETED researcher) failed", "error", err)
-	}
-	logger.Info("Researcher completed", "output_length", len(researcherOutput))
-
-	// 6. Execute critic (LLM-backed) with budget check
-	logger.Info("Executing critic (LLM-backed)")
+	// 5. Execute researcher (LLM-backed) with budget check
+	logger.Info("Executing researcher (LLM-backed)")
 
 	// Check for forced failure trigger
 	if req.Query != "" && containsForceFailure(req.Query) {
@@ -156,34 +124,34 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 		return nil, fmt.Errorf("forced failure")
 	}
 
-	// Estimate prompt tokens for critic
-	samplePrompt := req.Query + " " + plannerOutput + " " + researcherOutput
-	var estOutput *activities.EstimatePromptTokensOutput
+	// Estimate prompt tokens for researcher
+	samplePrompt := req.Query + " " + plannerOutput
+	var researcherEstOutput *activities.EstimatePromptTokensOutput
 	err = workflow.ExecuteActivity(ctx, "EstimatePromptTokensActivity", activities.EstimatePromptTokensInput{
 		Model: req.Model,
 		Text:  samplePrompt,
-	}).Get(ctx, &estOutput)
+	}).Get(ctx, &researcherEstOutput)
 	if err != nil {
 		logger.Warn("EstimatePromptTokensActivity failed", "error", err)
 	}
 
-	// Check budget for critic
-	var budgetOutput *activities.CheckBudgetOutput
-	if estOutput != nil {
+	// Check budget for researcher
+	var researcherBudgetOutput *activities.CheckBudgetOutput
+	if researcherEstOutput != nil {
 		err = workflow.ExecuteActivity(ctx, "CheckBudgetActivity", activities.CheckBudgetInput{
-			EstimatedPromptTokens: estOutput.EstimatedPromptTokens,
+			EstimatedPromptTokens: researcherEstOutput.EstimatedPromptTokens,
 			MaxTotalTokens:        req.MaxTotalTokens,
 			MaxCompletionTokens:   req.MaxCompletionTokens,
-		}).Get(ctx, &budgetOutput)
+		}).Get(ctx, &researcherBudgetOutput)
 
 		if err != nil {
 			logger.Warn("CheckBudgetActivity failed", "error", err)
-		} else if !budgetOutput.Allowed {
-			logger.Warn("Budget exceeded for critic", "reason", budgetOutput.Reason)
+		} else if !researcherBudgetOutput.Allowed {
+			logger.Warn("Budget exceeded for researcher", "reason", researcherBudgetOutput.Reason)
 			workflow.ExecuteActivity(ctx, "SaveFailureActivity", activities.SaveFailureInput{
 				TaskID:    req.TaskID,
 				ErrorType: types.TaskStatusBudgetExceeded,
-				ErrorMsg:  budgetOutput.Reason,
+				ErrorMsg:  researcherBudgetOutput.Reason,
 			}).Get(ctx, nil)
 
 			workflow.ExecuteActivity(ctx, "RecordExecutionFailedActivity", activities.RecordExecutionFailedInput{
@@ -191,20 +159,158 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 				WorkflowID: req.WorkflowID,
 				RunID:      req.RunID,
 				ErrorType:  types.TaskStatusBudgetExceeded,
-				ErrorMsg:   budgetOutput.Reason,
+				ErrorMsg:   researcherBudgetOutput.Reason,
 			}).Get(ctx, nil)
 
 			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 				TaskID: req.TaskID,
-				Event:  events.NewTaskBudgetExceededEvent(req.TaskID, budgetOutput.Reason, estOutput.EstimatedPromptTokens, req.MaxTotalTokens),
+				Event:  events.NewTaskBudgetExceededEvent(req.TaskID, researcherBudgetOutput.Reason, researcherEstOutput.EstimatedPromptTokens, req.MaxTotalTokens),
 			}).Get(ctx, nil)
 
 			return &types.WorkflowTaskResult{
 				TaskID: req.TaskID,
 				Status: types.TaskStatusBudgetExceeded,
 				Answer: "",
-				Error:  budgetOutput.Reason,
+				Error:  researcherBudgetOutput.Reason,
 			}, nil
+		}
+	}
+
+	// Emit AGENT_STARTED for researcher
+	err = workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+		TaskID: req.TaskID,
+		Event:  events.NewAgentStartedEvent(req.TaskID, string(types.AgentRoleResearcher), 2),
+	}).Get(ctx, nil)
+	if err != nil {
+		logger.Error("EmitEventActivity (AGENT_STARTED researcher) failed", "error", err)
+	}
+
+	// Emit LLM_STARTED - only after budget check passes
+	workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+		TaskID: req.TaskID,
+		Event:  events.NewLLMStartedEvent(req.TaskID, req.Model),
+	}).Get(ctx, nil)
+
+	// Run researcher LLM call
+	var researcherOutput *types.RunResearcherAgentOutput
+	err = workflow.ExecuteActivity(ctx, "RunResearcherAgentActivity", types.RunResearcherAgentInput{
+		TaskID:              req.TaskID,
+		WorkflowID:          req.WorkflowID,
+		RunID:               req.RunID,
+		Query:               req.Query,
+		Model:               req.Model,
+		Temperature:         req.Temperature,
+		MaxCompletionTokens: researcherBudgetOutput.AllowedCompletionTokens,
+		PlannerOutput:       plannerOutput,
+	}).Get(ctx, &researcherOutput)
+
+	finishReason := "stop"
+	if err != nil {
+		finishReason = "error"
+		logger.Error("RunResearcherAgentActivity failed", "error", err)
+		mw.emitFailure(ctx, req, err, "researcher")
+		return nil, err
+	}
+
+	// Emit LLM_COMPLETED for researcher
+	workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+		TaskID: req.TaskID,
+		Event:  events.NewLLMCompletedEvent(req.TaskID, req.Model, finishReason, researcherOutput.LatencyMS),
+	}).Get(ctx, nil)
+
+	// Record researcher usage to llm_calls
+	workflow.ExecuteActivity(ctx, "RecordUsageActivity", activities.RecordUsageInput{
+		TaskID:                req.TaskID,
+		WorkflowID:           req.WorkflowID,
+		RunID:                 req.RunID,
+		Provider:              "openai_compatible",
+		Model:                 req.Model,
+		EstimatedPromptTokens: 0,
+		MaxCompletionTokens:   researcherBudgetOutput.AllowedCompletionTokens,
+		PromptTokens:          researcherOutput.PromptTokens,
+		CompletionTokens:      researcherOutput.CompletionTokens,
+		TotalTokens:           researcherOutput.TotalTokens,
+		LatencyMS:             researcherOutput.LatencyMS,
+		FinishReason:          finishReason,
+		AgentRole:             string(types.AgentRoleResearcher),
+	}).Get(ctx, nil)
+
+	// Emit USAGE_RECORDED for researcher
+	workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+		TaskID: req.TaskID,
+		Event:  events.NewUsageRecordedEvent(req.TaskID, researcherOutput.TotalTokens),
+	}).Get(ctx, nil)
+
+	// Emit AGENT_COMPLETED for researcher
+	err = workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+		TaskID: req.TaskID,
+		Event:  events.NewAgentCompletedEvent(req.TaskID, string(types.AgentRoleResearcher), "completed", researcherOutput.LLMOutput),
+	}).Get(ctx, nil)
+	if err != nil {
+		logger.Error("EmitEventActivity (AGENT_COMPLETED researcher) failed", "error", err)
+	}
+
+	logger.Info("Researcher completed", "tokens", researcherOutput.TotalTokens)
+
+	// Track accumulated tokens for budget check
+	accumulatedTokens := researcherOutput.TotalTokens
+
+	// 6. Execute critic (LLM-backed) with budget check considering researcher usage
+	logger.Info("Executing critic (LLM-backed)")
+
+	// Estimate prompt tokens for critic (including researcher output)
+	samplePrompt = req.Query + " " + plannerOutput + " " + researcherOutput.LLMOutput
+	var criticEstOutput *activities.EstimatePromptTokensOutput
+	err = workflow.ExecuteActivity(ctx, "EstimatePromptTokensActivity", activities.EstimatePromptTokensInput{
+		Model: req.Model,
+		Text:  samplePrompt,
+	}).Get(ctx, &criticEstOutput)
+	if err != nil {
+		logger.Warn("EstimatePromptTokensActivity failed for critic", "error", err)
+	}
+
+	// Check budget for critic (considering researcher usage)
+	var criticBudgetOutput *activities.CheckBudgetOutput
+	if criticEstOutput != nil {
+		// Calculate remaining budget after researcher
+		remainingBudget := req.MaxTotalTokens - accumulatedTokens
+		criticAllowed := min(criticEstOutput.EstimatedPromptTokens, remainingBudget)
+		if criticAllowed > req.MaxCompletionTokens {
+			criticAllowed = req.MaxCompletionTokens
+		}
+
+		if criticEstOutput.EstimatedPromptTokens > remainingBudget {
+			logger.Warn("Budget exceeded for critic", "remaining", remainingBudget, "estimated", criticEstOutput.EstimatedPromptTokens)
+			workflow.ExecuteActivity(ctx, "SaveFailureActivity", activities.SaveFailureInput{
+				TaskID:    req.TaskID,
+				ErrorType: types.TaskStatusBudgetExceeded,
+				ErrorMsg:  "budget exceeded after researcher",
+			}).Get(ctx, nil)
+
+			workflow.ExecuteActivity(ctx, "RecordExecutionFailedActivity", activities.RecordExecutionFailedInput{
+				TaskID:     req.TaskID,
+				WorkflowID: req.WorkflowID,
+				RunID:      req.RunID,
+				ErrorType:  types.TaskStatusBudgetExceeded,
+				ErrorMsg:   "budget exceeded after researcher",
+			}).Get(ctx, nil)
+
+			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+				TaskID: req.TaskID,
+				Event:  events.NewTaskBudgetExceededEvent(req.TaskID, "budget exceeded after researcher", criticEstOutput.EstimatedPromptTokens, req.MaxTotalTokens),
+			}).Get(ctx, nil)
+
+			return &types.WorkflowTaskResult{
+				TaskID: req.TaskID,
+				Status: types.TaskStatusBudgetExceeded,
+				Answer: "",
+				Error:  "budget exceeded after researcher",
+			}, nil
+		}
+
+		criticBudgetOutput = &activities.CheckBudgetOutput{
+			Allowed:                true,
+			AllowedCompletionTokens: criticAllowed,
 		}
 	}
 
@@ -217,14 +323,11 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 		logger.Error("EmitEventActivity (AGENT_STARTED critic) failed", "error", err)
 	}
 
-	// Emit LLM_STARTED - only after budget check passes
+	// Emit LLM_STARTED for critic
 	workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 		TaskID: req.TaskID,
 		Event:  events.NewLLMStartedEvent(req.TaskID, req.Model),
 	}).Get(ctx, nil)
-
-	// Current answer for critic to review (could be researcher output or empty)
-	currentAnswer := researcherOutput
 
 	// Run critic LLM call
 	var criticOutput *types.RunCriticAgentOutput
@@ -235,13 +338,12 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 		Query:               req.Query,
 		Model:               req.Model,
 		Temperature:         req.Temperature,
-		MaxCompletionTokens: budgetOutput.AllowedCompletionTokens,
+		MaxCompletionTokens: criticBudgetOutput.AllowedCompletionTokens,
 		PlannerOutput:       plannerOutput,
-		ResearcherOutput:    researcherOutput,
-		CurrentAnswer:       currentAnswer,
+		ResearcherOutput:    researcherOutput.LLMOutput,
+		CurrentAnswer:       researcherOutput.LLMOutput,
 	}).Get(ctx, &criticOutput)
 
-	finishReason := "stop"
 	if err != nil {
 		finishReason = "error"
 		logger.Error("RunCriticAgentActivity failed", "error", err)
@@ -263,7 +365,7 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 		Provider:              "openai_compatible",
 		Model:                 req.Model,
 		EstimatedPromptTokens: 0,
-		MaxCompletionTokens:   budgetOutput.AllowedCompletionTokens,
+		MaxCompletionTokens:   criticBudgetOutput.AllowedCompletionTokens,
 		PromptTokens:          criticOutput.PromptTokens,
 		CompletionTokens:      criticOutput.CompletionTokens,
 		TotalTokens:           criticOutput.TotalTokens,
@@ -295,14 +397,14 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 
 	logger.Info("Critic completed", "tokens", criticOutput.TotalTokens)
 
-	// Track accumulated tokens for budget check
-	accumulatedTokens := criticOutput.TotalTokens
+	// Update accumulated tokens
+	accumulatedTokens += criticOutput.TotalTokens
 
 	// 7. Execute synthesizer (LLM-backed)
 	logger.Info("Executing synthesizer (LLM-backed)")
 
-	// Estimate prompt tokens for synthesizer (including critic output)
-	synthSamplePrompt := req.Query + " " + plannerOutput + " " + researcherOutput + " " + criticOutput.LLMOutput
+	// Estimate prompt tokens for synthesizer (including researcher + critic output)
+	synthSamplePrompt := req.Query + " " + plannerOutput + " " + researcherOutput.LLMOutput + " " + criticOutput.LLMOutput
 	var synthEstOutput *activities.EstimatePromptTokensOutput
 	err = workflow.ExecuteActivity(ctx, "EstimatePromptTokensActivity", activities.EstimatePromptTokensInput{
 		Model: req.Model,
@@ -312,10 +414,10 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 		logger.Warn("EstimatePromptTokensActivity failed for synthesizer", "error", err)
 	}
 
-	// Check budget for synthesizer (considering critic usage)
+	// Check budget for synthesizer (considering researcher + critic usage)
 	var synthBudgetOutput *activities.CheckBudgetOutput
 	if synthEstOutput != nil {
-		// Calculate remaining budget after critic
+		// Calculate remaining budget after researcher + critic
 		remainingBudget := req.MaxTotalTokens - accumulatedTokens
 		synthAllowed := min(synthEstOutput.EstimatedPromptTokens, remainingBudget)
 		if synthAllowed > req.MaxCompletionTokens {
@@ -383,7 +485,7 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 		Temperature:         req.Temperature,
 		MaxCompletionTokens: synthBudgetOutput.AllowedCompletionTokens,
 		PlannerOutput:       plannerOutput,
-		ResearcherOutput:    researcherOutput,
+		ResearcherOutput:    researcherOutput.LLMOutput,
 		CriticOutput:        criticOutput.LLMOutput,
 	}).Get(ctx, &synthesizerOutput)
 
@@ -450,9 +552,9 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 		logger.Error("EmitEventActivity (MULTI_AGENT_SYNTHESIZED) failed", "error", err)
 	}
 
-	// 9. SaveResultActivity (with accumulated usage from critic + synthesizer)
-	totalPromptTokens := criticOutput.PromptTokens + synthesizerOutput.PromptTokens
-	totalCompletionTokens := criticOutput.CompletionTokens + synthesizerOutput.CompletionTokens
+	// 9. SaveResultActivity (with accumulated usage from researcher + critic + synthesizer)
+	totalPromptTokens := researcherOutput.PromptTokens + criticOutput.PromptTokens + synthesizerOutput.PromptTokens
+	totalCompletionTokens := researcherOutput.CompletionTokens + criticOutput.CompletionTokens + synthesizerOutput.CompletionTokens
 	totalUsageTokens := accumulatedTokens
 
 	err = workflow.ExecuteActivity(ctx, "SaveResultActivity", activities.SaveResultInput{

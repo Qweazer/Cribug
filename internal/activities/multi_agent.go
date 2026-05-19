@@ -260,3 +260,103 @@ Be concise but specific.`, input.Query, input.PlannerOutput, input.ResearcherOut
 		LatencyMS:        latencyMS,
 	}, nil
 }
+
+// RunResearcherAgent calls the Python LLM Service to research and gather information
+func (a *MultiAgentActivities) RunResearcherAgent(ctx context.Context, input types.RunResearcherAgentInput) (*types.RunResearcherAgentOutput, error) {
+	logger := activity.GetLogger(ctx)
+	logger.Info("RunResearcherAgent started", "task_id", input.TaskID, "model", input.Model)
+
+	// Check budget first - must be before LLM call
+	if input.MaxCompletionTokens <= 0 {
+		logger.Error("RunResearcherAgent: budget exceeded (max_completion_tokens=0)")
+		return nil, fmt.Errorf("budget exceeded: max_completion_tokens is 0")
+	}
+
+	// Build researcher prompt
+	researcherPrompt := fmt.Sprintf(`You are a researcher agent. Gather relevant points and produce useful supporting information.
+
+Original Query: %s
+
+Planner Output: %s
+
+Please provide:
+1. Key facts and evidence
+2. Supporting context
+3. Relevant considerations
+
+Be thorough but concise.`, input.Query, input.PlannerOutput)
+
+	messages := []types.LLMMessage{
+		{Role: "system", Content: "You are a researcher agent. Gather relevant points and produce useful supporting information."},
+		{Role: "user", Content: researcherPrompt},
+	}
+
+	reqBody := types.LLMRequest{
+		TraceID:             input.TaskID,
+		TaskID:              input.TaskID,
+		Provider:            "openai_compatible",
+		Model:               input.Model,
+		Messages:            messages,
+		Temperature:         input.Temperature,
+		MaxCompletionTokens: input.MaxCompletionTokens,
+		Role:                "researcher",
+	}
+	reqBody.Metadata = map[string]any{
+		"workflow_id": input.WorkflowID,
+		"run_id":      input.RunID,
+		"agent_role":  "researcher",
+	}
+
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	startTime := time.Now()
+
+	resp, err := a.httpClient.Post(
+		a.llmServiceURL+"/chat",
+		"application/json",
+		bytes.NewBuffer(jsonBody),
+	)
+	if err != nil {
+		logger.Error("RunResearcherAgent: HTTP call failed", "error", err)
+		return nil, fmt.Errorf("http call: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("llm service returned status %d", resp.StatusCode)
+	}
+
+	var llmResp types.LLMResponse
+	if err := json.NewDecoder(resp.Body).Decode(&llmResp); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	if llmResp.Error != nil && *llmResp.Error != "" {
+		return nil, fmt.Errorf("llm error: %s", *llmResp.Error)
+	}
+
+	latencyMS := time.Since(startTime).Milliseconds()
+
+	logger.Info("RunResearcherAgent completed", "task_id", input.TaskID, "tokens", llmResp.Usage.TotalTokens, "latency_ms", latencyMS)
+
+	return &types.RunResearcherAgentOutput{
+		Step: types.AgentStep{
+			TaskID:          input.TaskID,
+			Role:            types.AgentRoleResearcher,
+			Input:           researcherPrompt,
+			Output:          llmResp.Content,
+			Status:          "completed",
+			PromptTokens:    llmResp.Usage.PromptTokens,
+			CompletionTokens: llmResp.Usage.CompletionTokens,
+			TotalTokens:     llmResp.Usage.TotalTokens,
+		},
+		LLMOutput:         llmResp.Content,
+		PromptTokens:      llmResp.Usage.PromptTokens,
+		CompletionTokens: llmResp.Usage.CompletionTokens,
+		TotalTokens:      llmResp.Usage.TotalTokens,
+		LatencyMS:        latencyMS,
+	}, nil
+}

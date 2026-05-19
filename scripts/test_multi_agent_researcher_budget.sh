@@ -1,6 +1,6 @@
 #!/bin/bash
-# Test multi-agent Critic Budget exceeded
-# Tests: budget check blocks critic LLM call (Slice 5.3)
+# Test multi-agent Researcher Budget exceeded
+# Tests: budget check blocks researcher LLM call (Slice 5.4)
 
 set -euo pipefail
 
@@ -17,17 +17,17 @@ pass() { echo "  [PASS] $*" ; }
 fail() { echo "[FAIL] $*" >&2; exit 1; }
 
 echo ""
-echo "=== Multi-Agent Critic Budget Test (Slice 5.3) ==="
+echo "=== Multi-Agent Researcher Budget Test (Slice 5.4) ==="
 echo ""
 
-# Submit multi-agent task with very small budget that critic will exceed
-log "Creating multi-agent task with small budget for critic budget test..."
+# Submit multi-agent task with very small budget that researcher will exceed
+log "Creating multi-agent task with small budget for researcher budget test..."
 
 task_id=$(curl --noproxy '*' -s -X POST "$GATEWAY_URL/api/v1/tasks" \
   -H "Content-Type: application/json" \
   -d '{
-    "query": "critic budget test query",
-    "session_id": "sess-critic-budget-test",
+    "query": "researcher budget test query",
+    "session_id": "sess-researcher-budget-test",
     "config": {
       "mode": "multi_agent",
       "model": "gpt-4o-mini",
@@ -62,10 +62,10 @@ count=$(count_task_event "$task_id" "TASK_BUDGET_EXCEEDED")
 if [[ "$count" != "1" ]]; then fail "Expected 1 TASK_BUDGET_EXCEEDED, got $count"; fi
 pass "TASK_BUDGET_EXCEEDED count = 1"
 
-# No LLM_STARTED events (budget blocked before critic LLM call)
+# No LLM_STARTED events (budget blocked before researcher LLM call)
 count=$(count_task_event "$task_id" "LLM_STARTED")
 if [[ "$count" != "0" ]]; then fail "Expected 0 LLM_STARTED (budget blocked), got $count"; fi
-pass "LLM_STARTED count = 0 (budget blocked before critic)"
+pass "LLM_STARTED count = 0 (budget blocked before researcher)"
 
 # No LLM_COMPLETED events
 count=$(count_task_event "$task_id" "LLM_COMPLETED")
@@ -84,7 +84,7 @@ pass "TASK_COMPLETED count = 0"
 
 # Verify planner AGENT events happened
 count=$(count_task_event "$task_id" "AGENT_STARTED")
-if [[ "$count" -lt 1 ]]; then fail "Expected >=1 AGENT_STARTED (planner at least), got $count"; fi
+if [[ "$count" -lt 1 ]]; then fail "Expected >=1 AGENT_STARTED (planner executed), got $count"; fi
 pass "AGENT_STARTED count = $count (planner executed, researcher+critic+synthesizer blocked)"
 
 # Check no llm_calls in Postgres (budget exceeded before any LLM call)
@@ -102,4 +102,4 @@ pass "tasks.error_type = budget_exceeded"
 echo ""
 log "All budget assertions passed for task_id=$task_id"
 echo ""
-echo "=== Multi-Agent Critic Budget Test PASSED ==="
+echo "=== Multi-Agent Researcher Budget Test PASSED ==="

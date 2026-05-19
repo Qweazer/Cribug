@@ -85,20 +85,20 @@ count=$(count_task_event "$task_id" "AGENT_COMPLETED")
 if [[ "$count" != "4" ]]; then fail "Expected 4 AGENT_COMPLETED, got $count"; fi
 pass "AGENT_COMPLETED count = 4"
 
-# LLM_STARTED count = 2 (critic + synthesizer)
+# LLM_STARTED count = 3 (researcher + critic + synthesizer)
 count=$(count_task_event "$task_id" "LLM_STARTED")
-if [[ "$count" != "2" ]]; then fail "Expected 2 LLM_STARTED (critic+synthesizer), got $count"; fi
-pass "LLM_STARTED count = 2 (critic + synthesizer)"
+if [[ "$count" != "3" ]]; then fail "Expected 3 LLM_STARTED (researcher+critic+synthesizer), got $count"; fi
+pass "LLM_STARTED count = 3 (researcher + critic + synthesizer)"
 
-# LLM_COMPLETED count = 2
+# LLM_COMPLETED count = 3
 count=$(count_task_event "$task_id" "LLM_COMPLETED")
-if [[ "$count" != "2" ]]; then fail "Expected 2 LLM_COMPLETED (critic+synthesizer), got $count"; fi
-pass "LLM_COMPLETED count = 2"
+if [[ "$count" != "3" ]]; then fail "Expected 3 LLM_COMPLETED (researcher+critic+synthesizer), got $count"; fi
+pass "LLM_COMPLETED count = 3"
 
-# USAGE_RECORDED count = 2 (critic + synthesizer)
+# USAGE_RECORDED count = 3 (researcher + critic + synthesizer)
 count=$(count_task_event "$task_id" "USAGE_RECORDED")
-if [[ "$count" != "2" ]]; then fail "Expected 2 USAGE_RECORDED (critic+synthesizer), got $count"; fi
-pass "USAGE_RECORDED count = 2"
+if [[ "$count" != "3" ]]; then fail "Expected 3 USAGE_RECORDED (researcher+critic+synthesizer), got $count"; fi
+pass "USAGE_RECORDED count = 3"
 
 # MULTI_AGENT_SYNTHESIZED count = 1
 count=$(count_task_event "$task_id" "MULTI_AGENT_SYNTHESIZED")
@@ -115,10 +115,10 @@ count=$(count_task_event "$task_id" "TASK_FAILED")
 if [[ "$count" != "0" ]]; then fail "Expected 0 TASK_FAILED, got $count"; fi
 pass "TASK_FAILED count = 0"
 
-# Check Postgres llm_calls count = 2 (critic + synthesizer)
+# Check Postgres llm_calls count = 3 (researcher + critic + synthesizer)
 llm_count=$(count_llm_calls "$task_id")
-if [[ "$llm_count" != "2" ]]; then fail "Expected 2 llm_calls (critic+synthesizer), got $llm_count"; fi
-pass "llm_calls count = 2 (critic + synthesizer)"
+if [[ "$llm_count" != "3" ]]; then fail "Expected 3 llm_calls (researcher+critic+synthesizer), got $llm_count"; fi
+pass "llm_calls count = 3 (researcher + critic + synthesizer)"
 
 echo ""
 log "All assertions passed for task_id=$task_id"

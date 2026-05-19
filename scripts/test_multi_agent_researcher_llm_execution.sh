@@ -1,6 +1,6 @@
 #!/bin/bash
-# Test multi-agent Critic LLM execution
-# Tests: critic calls LLM and records usage (Slice 5.3)
+# Test multi-agent Researcher LLM execution
+# Tests: researcher calls LLM and records usage (Slice 5.4)
 
 set -euo pipefail
 
@@ -17,17 +17,17 @@ pass() { echo "  [PASS] $*" ; }
 fail() { echo "[FAIL] $*" >&2; exit 1; }
 
 echo ""
-echo "=== Multi-Agent Critic LLM Execution Test (Slice 5.3) ==="
+echo "=== Multi-Agent Researcher LLM Execution Test (Slice 5.4) ==="
 echo ""
 
-# Submit multi-agent task with LLM-backed critic
-log "Creating multi-agent task with LLM-backed critic..."
+# Submit multi-agent task with LLM-backed researcher
+log "Creating multi-agent task with LLM-backed researcher..."
 
 task_id=$(curl --noproxy '*' -s -X POST "$GATEWAY_URL/api/v1/tasks" \
   -H "Content-Type: application/json" \
   -d '{
-    "query": "critic llm execution test",
-    "session_id": "sess-critic-llm-test",
+    "query": "researcher llm execution test",
+    "session_id": "sess-researcher-llm-test",
     "config": {
       "mode": "multi_agent",
       "model": "gpt-4o-mini",
@@ -156,4 +156,4 @@ pass "tasks.usage_total_tokens = $task_tokens (researcher + critic + synthesizer
 echo ""
 log "All assertions passed for task_id=$task_id"
 echo ""
-echo "=== Multi-Agent Critic LLM Execution Test PASSED ==="
+echo "=== Multi-Agent Researcher LLM Execution Test PASSED ==="

@@ -78,6 +78,7 @@ func main() {
 	w.RegisterActivityWithOptions(dagActivities.RecordDAGNodeUsage, activity.RegisterOptions{Name: "RecordDAGNodeUsageActivity"})
 	w.RegisterActivityWithOptions(dagActivities.Synthesis, activity.RegisterOptions{Name: "SynthesisActivity"})
 	w.RegisterActivityWithOptions(multiAgentActivities.RunAgent, activity.RegisterOptions{Name: "RunAgentActivity"})
+	w.RegisterActivityWithOptions(multiAgentActivities.RunResearcherAgent, activity.RegisterOptions{Name: "RunResearcherAgentActivity"})
 	w.RegisterActivityWithOptions(multiAgentActivities.RunCriticAgent, activity.RegisterOptions{Name: "RunCriticAgentActivity"})
 	w.RegisterActivityWithOptions(multiAgentActivities.RunSynthesizerAgent, activity.RegisterOptions{Name: "RunSynthesizerAgentActivity"})
 

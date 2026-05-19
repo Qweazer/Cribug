@@ -111,6 +111,8 @@ func (h *Handler) createTask(w http.ResponseWriter, r *http.Request) {
 	workflowName := "SimpleWorkflow"
 	if workflowMode == types.WorkflowModeDAG {
 		workflowName = "DAGWorkflow"
+	} else if workflowMode == types.WorkflowModeMultiAgent {
+		workflowName = "MultiAgentWorkflow"
 	}
 
 	startOpts := client.StartWorkflowOptions{
