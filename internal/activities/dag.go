@@ -327,3 +327,89 @@ func (a *DAGActivities) RecordDAGNodeUsage(ctx context.Context, input RecordDAGN
 	logger.Info("RecordDAGNodeUsage completed", "task_id", input.TaskID, "node_id", input.NodeID)
 	return nil
 }
+
+// SynthesisActivity synthesizes DAG node results into a final answer
+type SynthesisInput struct {
+	TaskID       string
+	Query        string
+	Classification *types.TaskClassification
+	Plan         *types.DAGPlan
+	NodeResults  map[string]types.DAGNodeResult
+}
+
+type SynthesisOutput struct {
+	Result *types.DAGSynthesisResult
+}
+
+func (a *DAGActivities) Synthesis(ctx context.Context, input SynthesisInput) (*SynthesisOutput, error) {
+	logger := activity.GetLogger(ctx)
+	logger.Info("SynthesisActivity started", "task_id", input.TaskID, "node_count", len(input.Plan.Nodes))
+
+	// Aggregate results from node results map
+	nodeCount := len(input.Plan.Nodes)
+	completedNodes := 0
+	var finalAnswerParts []string
+
+	for _, node := range input.Plan.Nodes {
+		result, ok := input.NodeResults[node.ID]
+		if !ok {
+			logger.Warn("Missing result for node", "node_id", node.ID)
+			continue
+		}
+		if result.Status == "completed" {
+			completedNodes++
+			// Include draft_answer output in final answer
+			if node.ID == "draft_answer" && result.Output != "" {
+				finalAnswerParts = append(finalAnswerParts, result.Output)
+			}
+		}
+	}
+
+	// Check if all nodes completed
+	if completedNodes < nodeCount {
+		return nil, fmt.Errorf("synthesis failed: only %d/%d nodes completed", completedNodes, nodeCount)
+	}
+
+	// Query llm_calls for usage aggregation
+	var totalPromptTokens, totalCompletionTokens, totalTokens, llmNodes int
+	query := `SELECT
+		COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
+		COALESCE(SUM(completion_tokens), 0) as completion_tokens,
+		COALESCE(SUM(total_tokens), 0) as total_tokens,
+		COUNT(*) as llm_nodes
+	FROM llm_calls WHERE task_id = $1`
+	err := a.db.QueryRowContext(ctx, query, input.TaskID).Scan(
+		&totalPromptTokens, &totalCompletionTokens, &totalTokens, &llmNodes)
+	if err != nil && err != sql.ErrNoRows {
+		logger.Error("Failed to aggregate usage from llm_calls", "error", err)
+		// Continue with zeros rather than failing
+	}
+
+	// Build final answer
+	var finalAnswer string
+	if len(finalAnswerParts) > 0 {
+		finalAnswer = finalAnswerParts[0]
+	} else {
+		finalAnswer = "dag synthesized: " + input.Query
+	}
+
+	result := &types.DAGSynthesisResult{
+		TaskID:              input.TaskID,
+		FinalAnswer:         finalAnswer,
+		NodeCount:           nodeCount,
+		CompletedNodes:      completedNodes,
+		LLMNodes:           llmNodes,
+		TotalPromptTokens:   totalPromptTokens,
+		TotalCompletionTokens: totalCompletionTokens,
+		TotalTokens:        totalTokens,
+	}
+
+	logger.Info("SynthesisActivity completed",
+		"task_id", input.TaskID,
+		"node_count", result.NodeCount,
+		"completed_nodes", result.CompletedNodes,
+		"llm_nodes", result.LLMNodes,
+		"total_tokens", result.TotalTokens)
+
+	return &SynthesisOutput{Result: result}, nil
+}

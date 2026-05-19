@@ -72,6 +72,7 @@ func main() {
 	w.RegisterActivityWithOptions(dagActivities.PlanDAG, activity.RegisterOptions{Name: "PlanDAGActivity"})
 	w.RegisterActivityWithOptions(dagActivities.ExecuteDAGNode, activity.RegisterOptions{Name: "ExecuteDAGNodeActivity"})
 	w.RegisterActivityWithOptions(dagActivities.RecordDAGNodeUsage, activity.RegisterOptions{Name: "RecordDAGNodeUsageActivity"})
+	w.RegisterActivityWithOptions(dagActivities.Synthesis, activity.RegisterOptions{Name: "SynthesisActivity"})
 
 	log.Printf("worker started, task_queue=%s", cfg.TemporalTaskQueue)
 	if err := w.Run(worker.InterruptCh()); err != nil {

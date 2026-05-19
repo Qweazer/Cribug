@@ -66,11 +66,13 @@ sleep 2
 # 2. Verify result contains DAG completion
 log "2. Checking result..."
 RESULT=$(curl --noproxy '*' -s "$GATEWAY_URL/api/v1/tasks/$TASK_ID" | jq -r '.result')
-# Accept any DAG result format (skeleton/plan/executed/llm executed)
-if echo "$RESULT" | grep -qE "dag.*executed"; then
+# 4.6+: result contains mock answer from LLM node synthesis
+if echo "$RESULT" | grep -qE "mock answer"; then
+  log "  Result: $RESULT (DAG mode - mock answer - OK)"
+elif echo "$RESULT" | grep -qE "dag.*executed"; then
   log "  Result: $RESULT (DAG mode - OK)"
 else
-  fail "Result does not contain DAG message: $RESULT"
+  fail "Result does not contain mock answer or DAG message: $RESULT"
 fi
 
 # 3. Verify Redis events

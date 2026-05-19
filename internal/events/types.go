@@ -16,6 +16,7 @@ const (
 	EventTypeDAGPlanned         = "DAG_PLANNED"
 	EventTypeDAGNodeStarted     = "DAG_NODE_STARTED"
 	EventTypeDAGNodeCompleted   = "DAG_NODE_COMPLETED"
+	EventTypeDAGSynthesized     = "DAG_SYNTHESIZED"
 )
 
 type AgentEvent struct {
@@ -146,5 +147,16 @@ func NewDAGNodeCompletedEvent(taskID, nodeID, nodeType, status, output string) A
 		"status":    status,
 		"output":    output,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewDAGSynthesizedEvent(taskID string, nodeCount, completedNodes, llmNodes, totalTokens int) AgentEvent {
+	return NewAgentEvent(EventTypeDAGSynthesized, map[string]interface{}{
+		"task_id":         taskID,
+		"node_count":      nodeCount,
+		"completed_nodes":  completedNodes,
+		"llm_nodes":       llmNodes,
+		"total_tokens":    totalTokens,
+		"timestamp":       time.Now().UTC().Format(time.RFC3339),
 	})
 }

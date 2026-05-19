@@ -37,3 +37,14 @@ type DAGNodeResult struct {
 	Output     string `json:"output"`
 	Error      string `json:"error,omitempty"`
 }
+
+type DAGSynthesisResult struct {
+	TaskID              string `json:"task_id"`
+	FinalAnswer         string `json:"final_answer"`
+	NodeCount           int    `json:"node_count"`
+	CompletedNodes      int    `json:"completed_nodes"`
+	LLMNodes           int    `json:"llm_nodes"`
+	TotalPromptTokens   int    `json:"total_prompt_tokens"`
+	TotalCompletionTokens int  `json:"total_completion_tokens"`
+	TotalTokens        int    `json:"total_tokens"`
+}

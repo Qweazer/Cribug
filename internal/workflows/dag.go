@@ -1,8 +1,6 @@
 package workflows
 
 import (
-	"fmt"
-
 	"cribug/internal/activities"
 	"cribug/internal/events"
 	"cribug/internal/types"
@@ -152,9 +150,9 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 
 	// 11. Execute DAG nodes in order
 	nodeResults := make(map[string]types.DAGNodeResult)
-	completedNodes := 0
 	llmNodes := 0
 	totalTokens := 0
+	var totalPromptTokens, totalCompletionTokens int
 
 	for _, node := range plan.Nodes {
 		logger.Info("Executing DAG node", "node_id", node.ID, "use_llm", node.UseLLM)
@@ -211,6 +209,8 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 			if node.UseLLM && nodeOutput.Usage != nil {
 				llmNodes++
 				totalTokens += nodeOutput.Usage.TotalTokens
+				totalPromptTokens += nodeOutput.Usage.PromptTokens
+				totalCompletionTokens += nodeOutput.Usage.CompletionTokens
 
 				finishReason := "stop"
 				if nodeOutput.Result.Error != "" {
@@ -244,10 +244,6 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 					Event:  events.NewUsageRecordedEvent(req.TaskID, totalTokens),
 				}).Get(ctx, nil)
 			}
-
-			if nodeOutput.Result.Status == "completed" {
-				completedNodes++
-			}
 		}
 
 		// Emit DAG_NODE_COMPLETED
@@ -263,13 +259,60 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 		}).Get(ctx, nil)
 	}
 
-	// 9. Build result with execution info
-	result := fmt.Sprintf("dag llm executed: category=%s, node_count=%d, completed_nodes=%d, llm_nodes=%d, total_tokens=%d",
-		classification.Category, len(plan.Nodes), completedNodes, llmNodes, totalTokens)
+	// 12. SynthesisActivity
+	var synthesisOutput *activities.SynthesisOutput
+	err = workflow.ExecuteActivity(ctx, "SynthesisActivity", activities.SynthesisInput{
+		TaskID:         req.TaskID,
+		Query:          req.Query,
+		Classification: classification,
+		Plan:           plan,
+		NodeResults:    nodeResults,
+	}).Get(ctx, &synthesisOutput)
 
-	err = workflow.ExecuteActivity(ctx, "SaveResultActivity", activities.SaveResultInput{
+	if err != nil {
+		logger.Error("SynthesisActivity failed", "error", err)
+
+		workflow.ExecuteActivity(ctx, "SaveFailureActivity", activities.SaveFailureInput{
+			TaskID:    req.TaskID,
+			ErrorType: types.ErrorTypeWorkflow,
+			ErrorMsg:  err.Error(),
+		}).Get(ctx, nil)
+
+		workflow.ExecuteActivity(ctx, "RecordExecutionFailedActivity", activities.RecordExecutionFailedInput{
+			TaskID:     req.TaskID,
+			WorkflowID: req.WorkflowID,
+			RunID:      req.RunID,
+			ErrorType:  types.ErrorTypeWorkflow,
+			ErrorMsg:   err.Error(),
+		}).Get(ctx, nil)
+
+		workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+			TaskID: req.TaskID,
+			Event:  events.NewTaskFailedEvent(req.TaskID, req.WorkflowID, err.Error()),
+		}).Get(ctx, nil)
+
+		return nil, err
+	}
+
+	// 13. Emit DAG_SYNTHESIZED event
+	workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 		TaskID: req.TaskID,
-		Result: result,
+		Event:  events.NewDAGSynthesizedEvent(
+			req.TaskID,
+			synthesisOutput.Result.NodeCount,
+			synthesisOutput.Result.CompletedNodes,
+			synthesisOutput.Result.LLMNodes,
+			synthesisOutput.Result.TotalTokens,
+		),
+	}).Get(ctx, nil)
+
+	// 14. SaveResultActivity with usage
+	err = workflow.ExecuteActivity(ctx, "SaveResultActivity", activities.SaveResultInput{
+		TaskID:           req.TaskID,
+		Result:          synthesisOutput.Result.FinalAnswer,
+		PromptTokens:     &synthesisOutput.Result.TotalPromptTokens,
+		CompletionTokens: &synthesisOutput.Result.TotalCompletionTokens,
+		TotalTokens:      &synthesisOutput.Result.TotalTokens,
 	}).Get(ctx, nil)
 	if err != nil {
 		logger.Error("SaveResultActivity failed", "error", err)
@@ -296,7 +339,7 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 		return nil, err
 	}
 
-	// 10. RecordExecutionCompletedActivity
+	// 15. RecordExecutionCompletedActivity
 	err = workflow.ExecuteActivity(ctx, "RecordExecutionCompletedActivity", activities.RecordExecutionInput{
 		TaskID:     req.TaskID,
 		WorkflowID: req.WorkflowID,
@@ -306,16 +349,16 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 		logger.Error("RecordExecutionCompletedActivity failed", "error", err)
 	}
 
-	// 11. Emit TASK_COMPLETED
+	// 16. Emit TASK_COMPLETED
 	workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 		TaskID: req.TaskID,
 		Event:  events.NewTaskCompletedEvent(req.TaskID, req.WorkflowID),
 	}).Get(ctx, nil)
 
-	logger.Info("DAGWorkflow LLM execution completed", "task_id", req.TaskID, "result", result)
+	logger.Info("DAGWorkflow synthesis completed", "task_id", req.TaskID, "result", synthesisOutput.Result.FinalAnswer)
 	return &types.WorkflowTaskResult{
 		TaskID: req.TaskID,
 		Status: types.TaskStatusCompleted,
-		Answer: result,
+		Answer: synthesisOutput.Result.FinalAnswer,
 	}, nil
 }

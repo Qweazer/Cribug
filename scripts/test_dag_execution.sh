@@ -66,9 +66,8 @@ sleep 2
 # 2. Verify result contains execution info
 log "2. Checking result..."
 RESULT=$(curl --noproxy '*' -s "$GATEWAY_URL/api/v1/tasks/$TASK_ID" | jq -r '.result')
-echo "$RESULT" | grep -q "dag" || fail "Result does not contain 'dag': $RESULT"
-echo "$RESULT" | grep -q "node_count=2" || fail "Result does not contain 'node_count=2': $RESULT"
-echo "$RESULT" | grep -q "completed_nodes=2" || fail "Result does not contain 'completed_nodes=2': $RESULT"
+# 4.6+: result contains mock answer from LLM node synthesis
+echo "$RESULT" | grep -q "mock answer" || fail "Result does not contain 'mock answer': $RESULT"
 log "  Result: $RESULT"
 
 # 3. Verify Redis events contain required events
