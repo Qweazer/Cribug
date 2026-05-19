@@ -233,9 +233,9 @@ log "  TASK_BUDGET_EXCEEDED count: $BUDGET_EVENTS"
 
 # Should NOT contain LLM_STARTED or LLM_COMPLETED
 log "  Checking no LLM_STARTED..."
-LLM_STARTED_COUNT=$(redis_cmd XRANGE "task:$TASK_ID3:events" - + | grep -c "LLM_STARTED" || true)
-LLM_STARTED_COUNT=$(echo "$LLM_STARTED_COUNT" | tr -d '[:space:]')
-log "  LLM_STARTED count: '$LLM_STARTED_COUNT'"
+LLM_STARTED_COUNT=$(redis_cmd XRANGE "task:$TASK_ID3:events" - + 2>/dev/null | grep -c "LLM_STARTED" || true)
+LLM_STARTED_COUNT="${LLM_STARTED_COUNT:-0}"
+log "  LLM_STARTED count: $LLM_STARTED_COUNT"
 [ "$LLM_STARTED_COUNT" = "0" ] || fail "Budget exceeded task should not have LLM_STARTED"
 log "  Budget Exceeded: OK (status=$STATUS3, error_type=$ERROR_TYPE, llm_calls=0)"
 

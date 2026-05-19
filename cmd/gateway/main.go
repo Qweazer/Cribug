@@ -45,7 +45,7 @@ func main() {
 		defer temporalClient.Close()
 	}
 
-	h := api.NewHandler(dbClient, redisClient, temporalClient)
+	h := api.NewHandler(dbClient, redisClient, temporalClient, cfg)
 	r := api.NewRouter(h)
 
 	srv := &http.Server{

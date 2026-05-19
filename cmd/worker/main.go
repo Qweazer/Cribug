@@ -46,11 +46,15 @@ func main() {
 	sessionActivities := activities.NewSessionActivities(redisClient)
 	budgetActivities := activities.NewBudgetActivities()
 	usageActivities := activities.NewUsageActivities(dbClient.Stdlib())
+	dagActivities := activities.NewDAGActivities()
 
 	w := worker.New(temporalClient, cfg.TemporalTaskQueue, worker.Options{})
 
 	sw := workflows.NewSimpleWorkflow()
 	w.RegisterWorkflowWithOptions(sw.Execute, workflow.RegisterOptions{Name: workflows.WorkflowName})
+
+	dw := workflows.NewDAGWorkflow()
+	w.RegisterWorkflowWithOptions(dw.Execute, workflow.RegisterOptions{Name: workflows.DAGWorkflowName})
 
 	// Register all activities
 	w.RegisterActivityWithOptions(emitEventActivity.Execute, activity.RegisterOptions{Name: "EmitEventActivity"})
@@ -64,6 +68,9 @@ func main() {
 	w.RegisterActivityWithOptions(budgetActivities.EstimatePromptTokens, activity.RegisterOptions{Name: "EstimatePromptTokensActivity"})
 	w.RegisterActivityWithOptions(budgetActivities.CheckBudget, activity.RegisterOptions{Name: "CheckBudgetActivity"})
 	w.RegisterActivityWithOptions(usageActivities.RecordUsage, activity.RegisterOptions{Name: "RecordUsageActivity"})
+	w.RegisterActivityWithOptions(dagActivities.ClassifyTask, activity.RegisterOptions{Name: "ClassifyTaskActivity"})
+	w.RegisterActivityWithOptions(dagActivities.PlanDAG, activity.RegisterOptions{Name: "PlanDAGActivity"})
+	w.RegisterActivityWithOptions(dagActivities.ExecuteDAGNode, activity.RegisterOptions{Name: "ExecuteDAGNodeActivity"})
 
 	log.Printf("worker started, task_queue=%s", cfg.TemporalTaskQueue)
 	if err := w.Run(worker.InterruptCh()); err != nil {

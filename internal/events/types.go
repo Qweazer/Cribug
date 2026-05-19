@@ -12,6 +12,10 @@ const (
 	EventTypeSessionLoaded      = "SESSION_LOADED"
 	EventTypeUsageRecorded      = "USAGE_RECORDED"
 	EventTypeTaskBudgetExceeded = "TASK_BUDGET_EXCEEDED"
+	EventTypeTaskClassified     = "TASK_CLASSIFIED"
+	EventTypeDAGPlanned         = "DAG_PLANNED"
+	EventTypeDAGNodeStarted     = "DAG_NODE_STARTED"
+	EventTypeDAGNodeCompleted   = "DAG_NODE_COMPLETED"
 )
 
 type AgentEvent struct {
@@ -103,5 +107,44 @@ func NewTaskBudgetExceededEvent(taskID, reason string, estimatedPromptTokens, ma
 		"estimated_prompt_tokens": estimatedPromptTokens,
 		"max_total_tokens":        maxTotalTokens,
 		"timestamp":               time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewTaskClassifiedEvent(taskID, category string, complexity float64, requiresTools bool) AgentEvent {
+	return NewAgentEvent(EventTypeTaskClassified, map[string]interface{}{
+		"task_id":        taskID,
+		"category":       category,
+		"complexity":     complexity,
+		"requires_tools": requiresTools,
+		"timestamp":      time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewDAGPlannedEvent(taskID string, nodeCount, edgeCount int) AgentEvent {
+	return NewAgentEvent(EventTypeDAGPlanned, map[string]interface{}{
+		"task_id":    taskID,
+		"node_count": nodeCount,
+		"edge_count": edgeCount,
+		"timestamp":  time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewDAGNodeStartedEvent(taskID, nodeID, nodeType string) AgentEvent {
+	return NewAgentEvent(EventTypeDAGNodeStarted, map[string]interface{}{
+		"task_id":   taskID,
+		"node_id":   nodeID,
+		"node_type": nodeType,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewDAGNodeCompletedEvent(taskID, nodeID, nodeType, status, output string) AgentEvent {
+	return NewAgentEvent(EventTypeDAGNodeCompleted, map[string]interface{}{
+		"task_id":   taskID,
+		"node_id":   nodeID,
+		"node_type": nodeType,
+		"status":    status,
+		"output":    output,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	})
 }

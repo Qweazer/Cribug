@@ -28,7 +28,15 @@ type TaskConfig struct {
 	MaxCompletionTokens *int     `json:"max_completion_tokens"`
 	Model               *string  `json:"model"`
 	Temperature         *float64 `json:"temperature"`
+	Mode                *string  `json:"mode,omitempty"`
+	EnableTools         *bool    `json:"enable_tools,omitempty"`
 }
+
+const (
+	WorkflowModeSimple     = "simple"
+	WorkflowModeDAG       = "dag"
+	WorkflowModeMultiAgent = "multi_agent"
+)
 
 type CreateTaskRequest struct {
 	Query     string     `json:"query"`

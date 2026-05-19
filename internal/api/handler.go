@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"cribug/internal/activities"
+	"cribug/internal/config"
 	"cribug/internal/db"
 	"cribug/internal/events"
 	redisclient "cribug/internal/redis"
@@ -24,13 +25,15 @@ type Handler struct {
 	db      *db.Postgres
 	redis   *redisclient.Client
 	temporal client.Client
+	cfg     *config.Config
 }
 
-func NewHandler(database *db.Postgres, redisClient *redisclient.Client, temporalClient client.Client) *Handler {
+func NewHandler(database *db.Postgres, redisClient *redisclient.Client, temporalClient client.Client, cfg *config.Config) *Handler {
 	return &Handler{
 		db:      database,
 		redis:   redisClient,
 		temporal: temporalClient,
+		cfg:     cfg,
 	}
 }
 
@@ -44,6 +47,13 @@ func (h *Handler) createTask(w http.ResponseWriter, r *http.Request) {
 	req.Query = strings.TrimSpace(req.Query)
 	if req.Query == "" {
 		WriteError(w, http.StatusBadRequest, "query is required", types.ErrorTypeValidation)
+		return
+	}
+
+	// Validate mode and feature flags
+	workflowMode, err := h.validateTaskMode(req.Config)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, err.Error(), types.ErrorTypeValidation)
 		return
 	}
 
@@ -97,12 +107,18 @@ func (h *Handler) createTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Determine workflow name based on mode
+	workflowName := "SimpleWorkflow"
+	if workflowMode == types.WorkflowModeDAG {
+		workflowName = "DAGWorkflow"
+	}
+
 	startOpts := client.StartWorkflowOptions{
 		TaskQueue: "orchestrator-task-queue",
 		ID:        workflowID,
 	}
 
-	wfRun, err := h.temporal.ExecuteWorkflow(ctx, startOpts, "SimpleWorkflow", workflowReq)
+	wfRun, err := h.temporal.ExecuteWorkflow(ctx, startOpts, workflowName, workflowReq)
 	if err != nil {
 		log.Printf("[ERROR] start workflow: %v", err)
 		h.db.UpdateTaskError(ctx, taskID, types.ErrorTypeWorkflowStart, err.Error())
@@ -138,6 +154,41 @@ func (h *Handler) createTask(w http.ResponseWriter, r *http.Request) {
 		Status:     types.TaskStatusRunning,
 		StreamURL:  "/api/v1/stream/sse?task_id=" + taskID,
 	})
+}
+
+// validateTaskMode validates the mode and feature flags, returns the validated mode
+func (h *Handler) validateTaskMode(cfg *types.TaskConfig) (string, error) {
+	// Default mode is "simple"
+	mode := types.WorkflowModeSimple
+
+	if cfg != nil && cfg.Mode != nil {
+		mode = *cfg.Mode
+	}
+
+	// Validate mode value
+	switch mode {
+	case types.WorkflowModeSimple:
+		// OK
+	case types.WorkflowModeDAG:
+		if !h.cfg.EnableDAGWorkflow {
+			return "", fmt.Errorf("mode 'dag' is not enabled: set ENABLE_DAG_WORKFLOW=true to enable")
+		}
+	case types.WorkflowModeMultiAgent:
+		if !h.cfg.EnableMultiAgent {
+			return "", fmt.Errorf("mode 'multi_agent' is not enabled: set ENABLE_MULTI_AGENT=true to enable")
+		}
+	default:
+		return "", fmt.Errorf("invalid mode '%s': must be 'simple', 'dag', or 'multi_agent'", mode)
+	}
+
+	// Validate enable_tools
+	if cfg != nil && cfg.EnableTools != nil && *cfg.EnableTools {
+		if !h.cfg.EnableTools {
+			return "", fmt.Errorf("enable_tools=true is not enabled: set ENABLE_TOOLS=true to enable")
+		}
+	}
+
+	return mode, nil
 }
 
 func (h *Handler) getTask(w http.ResponseWriter, r *http.Request) {

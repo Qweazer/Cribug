@@ -124,7 +124,7 @@ Temporal UI: http://127.0.0.1:18088
 curl --noproxy '*' -s http://127.0.0.1:8080/health | jq
 ```
 
-### Create Task
+### Create Task with Mode
 
 ```bash
 curl --noproxy '*' -s -X POST http://127.0.0.1:8080/api/v1/tasks \
@@ -133,13 +133,44 @@ curl --noproxy '*' -s -X POST http://127.0.0.1:8080/api/v1/tasks \
     "query": "Hello world",
     "session_id": "my-session",
     "config": {
+      "mode": "simple",
       "model": "gpt-4o-mini",
       "temperature": 0.7,
       "max_total_tokens": 8000,
-      "max_completion_tokens": 128
+      "max_completion_tokens": 128,
+      "enable_tools": false
     }
   }' | jq
 ```
+
+**Mode options:**
+- `simple` (default): Single-agent execution via SimpleWorkflow
+- `dag`: DAG workflow with multiple nodes (requires `ENABLE_DAG_WORKFLOW=true`)
+- `multi_agent`: Multi-agent chain (planner → worker → critic → synthesizer, requires `ENABLE_MULTI_AGENT=true`)
+
+**Feature flags:**
+- `ENABLE_DAG_WORKFLOW=true`: Enable DAG mode
+- `ENABLE_MULTI_AGENT=true`: Enable multi-agent mode
+- `ENABLE_TOOLS=true`: Enable tool calling (calculator, echo)
+
+When a feature is disabled and the corresponding config is set, the API returns HTTP 400 with `validation_error`.
+
+### DAG Workflow Planning (Slice 4.3)
+
+With `ENABLE_DAG_WORKFLOW=true`, setting `config.mode="dag"` routes to DAGWorkflow with planning. DAG planning:
+- Emits WORKFLOW_STARTED, SESSION_LOADED, TASK_CLASSIFIED, DAG_PLANNED, TASK_COMPLETED events
+- Loads session memory
+- ClassifyTaskActivity classifies task (simple/analysis/creative)
+- PlanDAGActivity generates minimal 2-node DAG (analyze_input → draft_answer)
+- Returns result: `"dag plan created: category=X, complexity=Y, nodes=N, edges=M"`
+- **Does NOT** call LLM or write llm_calls records
+
+```bash
+# Test DAG planning (requires ENABLE_DAG_WORKFLOW=true on Gateway and Worker)
+ENABLE_DAG_WORKFLOW=true bash scripts/test_dag_plan.sh
+```
+
+Note: DAG node execution and synthesis are in Slice 4.4+.
 
 ### Get Task Status
 
@@ -222,6 +253,7 @@ This validates:
 | `scripts/run-llm-service.sh` | Start Python LLM Service |
 | `scripts/test_sse.sh` | Test SSE endpoint |
 | `scripts/smoke_test.sh` | Full MVP smoke test |
+| `scripts/test_dag_plan.sh` | Test DAG planning (requires ENABLE_DAG_WORKFLOW=true) |
 
 ## Troubleshooting
 
@@ -263,10 +295,12 @@ Gateway cannot reach Temporal:
 2. Check RecordUsageActivity executed
 3. Check Postgres has data: `docker.exe exec deploy-postgres-1 psql ...`
 
-## What We DON'T Do
+## What We DON'T Do (Yet)
 
-This MVP does NOT include:
-- DAG workflows
+This MVP does NOT currently include:
+- Real DAG workflows (Phase 3A upcoming)
+- Multi-agent chains (Phase 3B upcoming)
+- Tool calling (Phase 3C upcoming)
 - RAG (Retrieval Augmented Generation)
 - MCP (Model Context Protocol)
 - OPA (Open Policy Agent)

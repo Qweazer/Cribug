@@ -1,0 +1,13 @@
+# Feature flags for Cribug Phase 3
+
+features:
+  # Phase 2 features (always enabled)
+  enable_sse: true
+  enable_budget: true
+  enable_session_memory: true
+  enable_session_postgres: false
+
+  # Phase 3 features (disabled by default, enable after implementing)
+  enable_dag_workflow: false
+  enable_multi_agent: false
+  enable_tools: false
