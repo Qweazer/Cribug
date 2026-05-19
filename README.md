@@ -155,7 +155,61 @@ curl --noproxy '*' -s -X POST http://127.0.0.1:8080/api/v1/tasks \
 
 When a feature is disabled and the corresponding config is set, the API returns HTTP 400 with `validation_error`.
 
-### DAG Workflow Planning (Slice 4.3)
+### Multi-Agent Lite (Phase 3B Slice 5.1-5.2)
+
+Multi-agent workflow is implemented with the following status:
+
+- **mode=multi_agent** controlled by `ENABLE_MULTI_AGENT` feature flag
+- **Roles:** planner → researcher → critic → synthesizer (sequential, no concurrency)
+- **Agent execution:**
+  - planner: mock, returns "planned approach for task <task_id>"
+  - researcher: mock, returns "researched context for task <task_id>"
+  - critic: mock, returns "reviewed draft for task <task_id>"
+  - synthesizer: **LLM-backed**, calls Python LLM Service with combined prompt
+- **Synthesizer LLM call:**
+  - Combines original query + planner output + researcher output + critic output
+  - Records usage to llm_calls with agent_role='synthesizer'
+  - Budget check before LLM call (prevents LLM_STARTED if budget exceeded)
+- **No llm_calls for planner/researcher/critic:** Only synthesizer writes llm_calls
+- **Events emitted:**
+  - WORKFLOW_STARTED (1)
+  - SESSION_LOADED (1)
+  - AGENT_STARTED planner (1)
+  - AGENT_COMPLETED planner (1)
+  - AGENT_STARTED researcher (1)
+  - AGENT_COMPLETED researcher (1)
+  - AGENT_STARTED critic (1)
+  - AGENT_COMPLETED critic (1)
+  - AGENT_STARTED synthesizer (1)
+  - LLM_STARTED synthesizer (1)
+  - LLM_COMPLETED synthesizer (1)
+  - USAGE_RECORDED (1)
+  - AGENT_COMPLETED synthesizer (1)
+  - MULTI_AGENT_SYNTHESIZED (1)
+  - TASK_COMPLETED (1)
+- **Failure path:** Query containing `__force_multi_agent_failure__` triggers failure
+- **Budget path:** max_total_tokens too low triggers TASK_BUDGET_EXCEEDED
+- **Current state:** Uses mock Python LLM Service (not real OpenAI)
+- **Future:** Slice 5.3+ will add real OpenAI integration
+
+```bash
+# Test multi-agent skeleton (requires ENABLE_MULTI_AGENT=true on Gateway and Worker)
+ENABLE_MULTI_AGENT=true bash scripts/test_multi_agent_skeleton.sh
+
+# Test multi-agent LLM execution
+ENABLE_MULTI_AGENT=true bash scripts/test_multi_agent_llm_execution.sh
+
+# Test budget protection
+ENABLE_MULTI_AGENT=true bash scripts/test_multi_agent_llm_budget.sh
+
+# Test failure path
+ENABLE_MULTI_AGENT=true bash scripts/test_multi_agent_failure.sh
+
+# Run full multi-agent lite test suite
+ENABLE_MULTI_AGENT=true bash scripts/test_multi_agent_lite_full.sh
+```
+
+## DAG Workflow Planning (Slice 4.3)
 
 With `ENABLE_DAG_WORKFLOW=true`, setting `config.mode="dag"` routes to DAGWorkflow with planning. DAG planning:
 - Emits WORKFLOW_STARTED, SESSION_LOADED, TASK_CLASSIFIED, DAG_PLANNED, TASK_COMPLETED events
@@ -298,8 +352,8 @@ Gateway cannot reach Temporal:
 ## What We DON'T Do (Yet)
 
 This MVP does NOT currently include:
-- Real DAG workflows (Phase 3A upcoming)
-- Multi-agent chains (Phase 3B upcoming)
+- Real DAG workflows (Phase 3A - DAG planning complete, execution in progress)
+- Real multi-agent chains (Phase 3B - skeleton complete, LLM integration upcoming)
 - Tool calling (Phase 3C upcoming)
 - RAG (Retrieval Augmented Generation)
 - MCP (Model Context Protocol)

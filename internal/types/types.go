@@ -167,6 +167,7 @@ type LLMRequest struct {
 	Temperature         float64        `json:"temperature"`
 	MaxCompletionTokens int            `json:"max_completion_tokens"`
 	ResponseFormat      *string        `json:"response_format,omitempty"`
+	Role                string         `json:"role,omitempty"` // "planner" | "researcher" | "critic" | "synthesizer"
 	Metadata            map[string]any `json:"metadata,omitempty"`
 }
 

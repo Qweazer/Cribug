@@ -30,24 +30,29 @@ type RecordUsageInput struct {
 	TotalTokens           int
 	LatencyMS             int64
 	FinishReason          string
+	AgentRole             string // "critic" | "synthesizer" | "planner" | "researcher" (for multi-agent) or empty for simple
 }
 
 func (a *UsageActivities) RecordUsage(ctx context.Context, input RecordUsageInput) error {
 	logger := activity.GetLogger(ctx)
-	logger.Info("RecordUsageActivity started", "task_id", input.TaskID, "total_tokens", input.TotalTokens)
+	logger.Info("RecordUsageActivity started", "task_id", input.TaskID, "total_tokens", input.TotalTokens, "agent_role", input.AgentRole)
 
 	// call_id is task_id + ":llm" for idempotency
+	// For multi-agent, we need unique call_id per agent role
 	callID := input.TaskID + ":llm"
+	if input.AgentRole != "" {
+		callID = input.TaskID + ":llm:" + input.AgentRole
+	}
 
 	query := `
 		INSERT INTO llm_calls (
 			id, call_id, task_id, workflow_id, run_id, provider, model,
 			estimated_prompt_tokens, max_completion_tokens,
 			prompt_tokens, completion_tokens, total_tokens,
-			latency_ms, finish_reason, created_at
+			latency_ms, finish_reason, agent_role, created_at
 		) VALUES (
 			gen_random_uuid(), $1, $2, $3, $4, $5, $6,
-			$7, $8, $9, $10, $11, $12, $13, NOW()
+			$7, $8, $9, $10, $11, $12, $13, $14, NOW()
 		)
 		ON CONFLICT (call_id) DO UPDATE SET
 			prompt_tokens = EXCLUDED.prompt_tokens,
@@ -72,6 +77,7 @@ func (a *UsageActivities) RecordUsage(ctx context.Context, input RecordUsageInpu
 		input.TotalTokens,
 		input.LatencyMS,
 		input.FinishReason,
+		input.AgentRole,
 	).Scan(&id)
 
 	if err != nil {

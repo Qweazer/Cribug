@@ -3,20 +3,24 @@ package events
 import "time"
 
 const (
-	EventTypeTaskCreated        = "TASK_CREATED"
-	EventTypeWorkflowStarted    = "WORKFLOW_STARTED"
-	EventTypeTaskCompleted      = "TASK_COMPLETED"
-	EventTypeTaskFailed         = "TASK_FAILED"
-	EventTypeLLMStarted         = "LLM_STARTED"
-	EventTypeLLMCompleted       = "LLM_COMPLETED"
-	EventTypeSessionLoaded      = "SESSION_LOADED"
-	EventTypeUsageRecorded      = "USAGE_RECORDED"
-	EventTypeTaskBudgetExceeded = "TASK_BUDGET_EXCEEDED"
-	EventTypeTaskClassified     = "TASK_CLASSIFIED"
-	EventTypeDAGPlanned         = "DAG_PLANNED"
-	EventTypeDAGNodeStarted     = "DAG_NODE_STARTED"
-	EventTypeDAGNodeCompleted   = "DAG_NODE_COMPLETED"
-	EventTypeDAGSynthesized     = "DAG_SYNTHESIZED"
+	EventTypeTaskCreated           = "TASK_CREATED"
+	EventTypeWorkflowStarted       = "WORKFLOW_STARTED"
+	EventTypeTaskCompleted         = "TASK_COMPLETED"
+	EventTypeTaskFailed            = "TASK_FAILED"
+	EventTypeLLMStarted            = "LLM_STARTED"
+	EventTypeLLMCompleted          = "LLM_COMPLETED"
+	EventTypeSessionLoaded         = "SESSION_LOADED"
+	EventTypeUsageRecorded         = "USAGE_RECORDED"
+	EventTypeTaskBudgetExceeded    = "TASK_BUDGET_EXCEEDED"
+	EventTypeTaskClassified        = "TASK_CLASSIFIED"
+	EventTypeDAGPlanned            = "DAG_PLANNED"
+	EventTypeDAGNodeStarted        = "DAG_NODE_STARTED"
+	EventTypeDAGNodeCompleted      = "DAG_NODE_COMPLETED"
+	EventTypeDAGSynthesized        = "DAG_SYNTHESIZED"
+	EventTypeAgentStarted          = "AGENT_STARTED"
+	EventTypeAgentCompleted        = "AGENT_COMPLETED"
+	EventTypeMultiAgentSynthesized = "MULTI_AGENT_SYNTHESIZED"
+	EventTypeCriticReviewed        = "CRITIC_REVIEWED"
 )
 
 type AgentEvent struct {
@@ -158,5 +162,42 @@ func NewDAGSynthesizedEvent(taskID string, nodeCount, completedNodes, llmNodes, 
 		"llm_nodes":       llmNodes,
 		"total_tokens":    totalTokens,
 		"timestamp":       time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewAgentStartedEvent(taskID, role string, stepIndex int) AgentEvent {
+	return NewAgentEvent(EventTypeAgentStarted, map[string]interface{}{
+		"task_id":    taskID,
+		"role":       role,
+		"step_index": stepIndex,
+		"timestamp":  time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewAgentCompletedEvent(taskID, role, status, output string) AgentEvent {
+	return NewAgentEvent(EventTypeAgentCompleted, map[string]interface{}{
+		"task_id":   taskID,
+		"role":      role,
+		"status":    status,
+		"output":    output,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewMultiAgentSynthesizedEvent(taskID string, agentCount, completedAgents, totalTokens int) AgentEvent {
+	return NewAgentEvent(EventTypeMultiAgentSynthesized, map[string]interface{}{
+		"task_id":          taskID,
+		"agent_count":      agentCount,
+		"completed_agents": completedAgents,
+		"total_tokens":     totalTokens,
+		"timestamp":        time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewCriticReviewedEvent(taskID, critique string) AgentEvent {
+	return NewAgentEvent(EventTypeCriticReviewed, map[string]interface{}{
+		"task_id":   taskID,
+		"critique":  critique,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	})
 }

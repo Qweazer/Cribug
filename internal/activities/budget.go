@@ -86,3 +86,9 @@ func (a *BudgetActivities) CheckBudget(ctx context.Context, input CheckBudgetInp
 
 	return output, nil
 }
+
+// CheckSynthesizerBudget checks budget for synthesizer LLM call
+// Returns budget info but does NOT block execution - caller decides based on result
+func (a *BudgetActivities) CheckSynthesizerBudget(ctx context.Context, input CheckBudgetInput) (*CheckBudgetOutput, error) {
+	return a.CheckBudget(ctx, input)
+}

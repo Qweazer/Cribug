@@ -47,6 +47,7 @@ func main() {
 	budgetActivities := activities.NewBudgetActivities()
 	usageActivities := activities.NewUsageActivities(dbClient.Stdlib())
 	dagActivities := activities.NewDAGActivities(dbClient.Stdlib(), cfg.LLMServiceURL)
+	multiAgentActivities := activities.NewMultiAgentActivities(cfg.LLMServiceURL)
 
 	w := worker.New(temporalClient, cfg.TemporalTaskQueue, worker.Options{})
 
@@ -55,6 +56,9 @@ func main() {
 
 	dw := workflows.NewDAGWorkflow()
 	w.RegisterWorkflowWithOptions(dw.Execute, workflow.RegisterOptions{Name: workflows.DAGWorkflowName})
+
+	mw := workflows.NewMultiAgentWorkflow()
+	w.RegisterWorkflowWithOptions(mw.Execute, workflow.RegisterOptions{Name: workflows.MultiAgentWorkflowName})
 
 	// Register all activities
 	w.RegisterActivityWithOptions(emitEventActivity.Execute, activity.RegisterOptions{Name: "EmitEventActivity"})
@@ -73,6 +77,9 @@ func main() {
 	w.RegisterActivityWithOptions(dagActivities.ExecuteDAGNode, activity.RegisterOptions{Name: "ExecuteDAGNodeActivity"})
 	w.RegisterActivityWithOptions(dagActivities.RecordDAGNodeUsage, activity.RegisterOptions{Name: "RecordDAGNodeUsageActivity"})
 	w.RegisterActivityWithOptions(dagActivities.Synthesis, activity.RegisterOptions{Name: "SynthesisActivity"})
+	w.RegisterActivityWithOptions(multiAgentActivities.RunAgent, activity.RegisterOptions{Name: "RunAgentActivity"})
+	w.RegisterActivityWithOptions(multiAgentActivities.RunCriticAgent, activity.RegisterOptions{Name: "RunCriticAgentActivity"})
+	w.RegisterActivityWithOptions(multiAgentActivities.RunSynthesizerAgent, activity.RegisterOptions{Name: "RunSynthesizerAgentActivity"})
 
 	log.Printf("worker started, task_queue=%s", cfg.TemporalTaskQueue)
 	if err := w.Run(worker.InterruptCh()); err != nil {

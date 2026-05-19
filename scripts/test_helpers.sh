@@ -66,7 +66,9 @@ count_task_event() {
   local task_id=$1
   local event_type=$2
   local events=$(get_task_events "$task_id")
-  local count=$(echo "$events" | grep -E '"event_type":"'"$event_type"'"' | wc -l)
+  # Redis stream format: field names on separate lines from values
+  # Match "event_type\n$event_type\n" or "event_type\n$event_type$"
+  local count=$(echo "$events" | grep -E '^event_type$' -A 1 | grep -c "^$event_type$" || true)
   echo "${count:-0}"
 }
 
