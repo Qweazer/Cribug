@@ -76,6 +76,18 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 	criticToolStats := agentToolStats{}
 	synthesizerToolStats := agentToolStats{}
 
+	// Track stepwise tool execution metrics per agent (Slice 8.0)
+	type agentStepStats struct {
+		totalSteps   int
+		successSteps int
+		failedSteps  int
+		totalLatency int64
+		steps        []types.AgentToolStep
+	}
+	researcherStepStats := agentStepStats{}
+	criticStepStats := agentStepStats{}
+	synthesizerStepStats := agentStepStats{}
+
 	// Helper function to emit tool usage summary for an agent
 	emitToolUsageSummary := func(role string, stats agentToolStats) {
 		if stats.callCount > 0 {
@@ -221,8 +233,20 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 
 	// Handle tool execution if detected (before LLM call)
 	var toolResult *types.ToolResult
+	researcherStepID := 0
 	if toolDecision.Matched {
 		logger.Info("Researcher detected tool", "tool_name", toolDecision.ToolName)
+
+		// Track step start time for latency measurement
+		stepStartTime := time.Now()
+		researcherStepID++
+		stepID := researcherStepID
+
+		// Emit TOOL_STEP_STARTED (Slice 8.0)
+		workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+			TaskID: req.TaskID,
+			Event:  events.NewToolStepStartedEvent(req.TaskID, string(types.AgentRoleResearcher), stepID, toolDecision.ToolName, toolDecision.Arguments),
+		}).Get(ctx, nil)
 
 		// Emit TOOL_STARTED
 		workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
@@ -251,6 +275,18 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 			researcherToolStats.failureCount++
 			researcherToolStats.totalLatency += executeToolResult.LatencyMs
 			researcherToolStats.toolNames = append(researcherToolStats.toolNames, toolDecision.ToolName)
+
+			// Track stepwise stats (Slice 8.0)
+			researcherStepStats.totalSteps++
+			researcherStepStats.failedSteps++
+			stepLatency := time.Now().Sub(stepStartTime).Milliseconds()
+			researcherStepStats.totalLatency += stepLatency
+
+			// Emit TOOL_STEP_FAILED (Slice 8.0)
+			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+				TaskID: req.TaskID,
+				Event:  events.NewToolStepFailedEvent(req.TaskID, string(types.AgentRoleResearcher), stepID, toolDecision.ToolName, executeToolResult.Error, stepLatency),
+			}).Get(ctx, nil)
 
 			// Emit TOOL_FAILED
 			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
@@ -299,6 +335,18 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 			researcherToolStats.successCount++
 			researcherToolStats.totalLatency += executeToolResult.LatencyMs
 			researcherToolStats.toolNames = append(researcherToolStats.toolNames, toolDecision.ToolName)
+
+			// Track stepwise stats (Slice 8.0)
+			researcherStepStats.totalSteps++
+			researcherStepStats.successSteps++
+			stepLatency := time.Now().Sub(stepStartTime).Milliseconds()
+			researcherStepStats.totalLatency += stepLatency
+
+			// Emit TOOL_STEP_COMPLETED (Slice 8.0)
+			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+				TaskID: req.TaskID,
+				Event:  events.NewToolStepCompletedEvent(req.TaskID, string(types.AgentRoleResearcher), stepID, executeToolResult.ToolName, executeToolResult.Output, stepLatency, 0, 0, 0),
+			}).Get(ctx, nil)
 
 			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 				TaskID: req.TaskID,
@@ -373,9 +421,10 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 	// Emit AGENT_COMPLETED for researcher
 	var researcherFinalOutput string
 	if toolResult != nil {
-		// Merge tool result with researcher output (Slice 7.0: include stats)
-		toolSummary := fmt.Sprintf("Tools: %d calls, %d success, %d failed",
-			researcherToolStats.callCount, researcherToolStats.successCount, researcherToolStats.failureCount)
+		// Merge tool result with researcher output (Slice 8.0: include stepwise stats)
+		toolSummary := fmt.Sprintf("Tools: %d calls, %d success, %d failed (steps: %d total, %d success, %d failed)",
+			researcherToolStats.callCount, researcherToolStats.successCount, researcherToolStats.failureCount,
+			researcherStepStats.totalSteps, researcherStepStats.successSteps, researcherStepStats.failedSteps)
 		researcherFinalOutput = researcherOutput.LLMOutput + "\n\n[Tool " + toolResult.ToolName + " result: " + toolResult.Output + "]\n[" + toolSummary + "]"
 	} else {
 		researcherFinalOutput = researcherOutput.LLMOutput
@@ -467,10 +516,22 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 
 	// Detect tool intent for critic if tools are enabled
 	var criticToolResult *types.ToolResult
+	criticStepID := 0
 	if enableTools {
 		criticToolDecision := types.DetectToolIntent(req.Query)
 		if criticToolDecision.Matched {
 			logger.Info("Critic detected tool", "tool_name", criticToolDecision.ToolName)
+
+			// Track step start time for latency measurement
+			stepStartTime := time.Now()
+			criticStepID++
+			stepID := criticStepID
+
+			// Emit TOOL_STEP_STARTED (Slice 8.0)
+			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+				TaskID: req.TaskID,
+				Event:  events.NewToolStepStartedEvent(req.TaskID, string(types.AgentRoleCritic), stepID, criticToolDecision.ToolName, criticToolDecision.Arguments),
+			}).Get(ctx, nil)
 
 			// Emit TOOL_STARTED
 			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
@@ -499,6 +560,18 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 				criticToolStats.failureCount++
 				criticToolStats.totalLatency += executeToolResult.LatencyMs
 				criticToolStats.toolNames = append(criticToolStats.toolNames, criticToolDecision.ToolName)
+
+				// Track stepwise stats (Slice 8.0)
+				criticStepStats.totalSteps++
+				criticStepStats.failedSteps++
+				stepLatency := time.Now().Sub(stepStartTime).Milliseconds()
+				criticStepStats.totalLatency += stepLatency
+
+				// Emit TOOL_STEP_FAILED (Slice 8.0)
+				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+					TaskID: req.TaskID,
+					Event:  events.NewToolStepFailedEvent(req.TaskID, string(types.AgentRoleCritic), stepID, criticToolDecision.ToolName, executeToolResult.Error, stepLatency),
+				}).Get(ctx, nil)
 
 				// Emit TOOL_FAILED
 				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
@@ -547,6 +620,18 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 				criticToolStats.successCount++
 				criticToolStats.totalLatency += executeToolResult.LatencyMs
 				criticToolStats.toolNames = append(criticToolStats.toolNames, criticToolDecision.ToolName)
+
+				// Track stepwise stats (Slice 8.0)
+				criticStepStats.totalSteps++
+				criticStepStats.successSteps++
+				stepLatency := time.Now().Sub(stepStartTime).Milliseconds()
+				criticStepStats.totalLatency += stepLatency
+
+				// Emit TOOL_STEP_COMPLETED (Slice 8.0)
+				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+					TaskID: req.TaskID,
+					Event:  events.NewToolStepCompletedEvent(req.TaskID, string(types.AgentRoleCritic), stepID, executeToolResult.ToolName, executeToolResult.Output, stepLatency, 0, 0, 0),
+				}).Get(ctx, nil)
 
 				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 					TaskID: req.TaskID,
@@ -622,9 +707,10 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 	// Emit AGENT_COMPLETED for critic
 	var criticFinalOutput string
 	if criticToolResult != nil {
-		// Merge tool result with critic output (Slice 7.0: include stats)
-		toolSummary := fmt.Sprintf("Tools: %d calls, %d success, %d failed",
-			criticToolStats.callCount, criticToolStats.successCount, criticToolStats.failureCount)
+		// Merge tool result with critic output (Slice 8.0: include stepwise stats)
+		toolSummary := fmt.Sprintf("Tools: %d calls, %d success, %d failed (steps: %d total, %d success, %d failed)",
+			criticToolStats.callCount, criticToolStats.successCount, criticToolStats.failureCount,
+			criticStepStats.totalSteps, criticStepStats.successSteps, criticStepStats.failedSteps)
 		criticFinalOutput = criticOutput.LLMOutput + "\n\n[Tool " + criticToolResult.ToolName + " result: " + criticToolResult.Output + "]\n[" + toolSummary + "]"
 	} else {
 		criticFinalOutput = criticOutput.LLMOutput
@@ -722,10 +808,22 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 
 	// Detect tool intent for synthesizer if tools are enabled
 	var synthToolResult *types.ToolResult
+	synthesizerStepID := 0
 	if enableTools {
 		synthToolDecision := types.DetectToolIntent(req.Query)
 		if synthToolDecision.Matched {
 			logger.Info("Synthesizer detected tool", "tool_name", synthToolDecision.ToolName)
+
+			// Track step start time for latency measurement
+			stepStartTime := time.Now()
+			synthesizerStepID++
+			stepID := synthesizerStepID
+
+			// Emit TOOL_STEP_STARTED (Slice 8.0)
+			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+				TaskID: req.TaskID,
+				Event:  events.NewToolStepStartedEvent(req.TaskID, string(types.AgentRoleSynthesizer), stepID, synthToolDecision.ToolName, synthToolDecision.Arguments),
+			}).Get(ctx, nil)
 
 			// Emit TOOL_STARTED
 			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
@@ -754,6 +852,18 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 				synthesizerToolStats.failureCount++
 				synthesizerToolStats.totalLatency += executeToolResult.LatencyMs
 				synthesizerToolStats.toolNames = append(synthesizerToolStats.toolNames, synthToolDecision.ToolName)
+
+				// Track stepwise stats (Slice 8.0)
+				synthesizerStepStats.totalSteps++
+				synthesizerStepStats.failedSteps++
+				stepLatency := time.Now().Sub(stepStartTime).Milliseconds()
+				synthesizerStepStats.totalLatency += stepLatency
+
+				// Emit TOOL_STEP_FAILED (Slice 8.0)
+				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+					TaskID: req.TaskID,
+					Event:  events.NewToolStepFailedEvent(req.TaskID, string(types.AgentRoleSynthesizer), stepID, synthToolDecision.ToolName, executeToolResult.Error, stepLatency),
+				}).Get(ctx, nil)
 
 				// Emit TOOL_FAILED
 				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
@@ -802,6 +912,18 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 				synthesizerToolStats.successCount++
 				synthesizerToolStats.totalLatency += executeToolResult.LatencyMs
 				synthesizerToolStats.toolNames = append(synthesizerToolStats.toolNames, synthToolDecision.ToolName)
+
+				// Track stepwise stats (Slice 8.0)
+				synthesizerStepStats.totalSteps++
+				synthesizerStepStats.successSteps++
+				stepLatency := time.Now().Sub(stepStartTime).Milliseconds()
+				synthesizerStepStats.totalLatency += stepLatency
+
+				// Emit TOOL_STEP_COMPLETED (Slice 8.0)
+				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+					TaskID: req.TaskID,
+					Event:  events.NewToolStepCompletedEvent(req.TaskID, string(types.AgentRoleSynthesizer), stepID, executeToolResult.ToolName, executeToolResult.Output, stepLatency, 0, 0, 0),
+				}).Get(ctx, nil)
 
 				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 					TaskID: req.TaskID,
@@ -881,9 +1003,10 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 	// Emit AGENT_COMPLETED for synthesizer
 	var synthesizerFinalOutput string
 	if synthToolResult != nil {
-		// Merge tool result with synthesizer output (Slice 7.0: include stats)
-		toolSummary := fmt.Sprintf("Tools: %d calls, %d success, %d failed",
-			synthesizerToolStats.callCount, synthesizerToolStats.successCount, synthesizerToolStats.failureCount)
+		// Merge tool result with synthesizer output (Slice 8.0: include stepwise stats)
+		toolSummary := fmt.Sprintf("Tools: %d calls, %d success, %d failed (steps: %d total, %d success, %d failed)",
+			synthesizerToolStats.callCount, synthesizerToolStats.successCount, synthesizerToolStats.failureCount,
+			synthesizerStepStats.totalSteps, synthesizerStepStats.successSteps, synthesizerStepStats.failedSteps)
 		synthesizerFinalOutput = synthesizerOutput.LLMOutput + "\n\n[Tool " + synthToolResult.ToolName + " result: " + synthToolResult.Output + "]\n[" + toolSummary + "]"
 	} else {
 		synthesizerFinalOutput = synthesizerOutput.LLMOutput

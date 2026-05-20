@@ -21,6 +21,7 @@ type AgentStep struct {
 	PromptTokens    int       `json:"prompt_tokens,omitempty"`
 	CompletionTokens int       `json:"completion_tokens,omitempty"`
 	TotalTokens     int       `json:"total_tokens,omitempty"`
+	ToolSteps       []AgentToolStep `json:"tool_steps,omitempty"`
 }
 
 // MultiAgentResult represents the final result of multi-agent execution
@@ -160,4 +161,75 @@ type WorkflowToolSummary struct {
 	TotalFailures int               `json:"total_failures"`
 	TotalLatency   int               `json:"total_latency_ms"`
 	AgentStats    []AgentToolUsage  `json:"agent_stats"`
+}
+
+// RunCriticWithToolsInput is the input for critic with step-level tool tracking
+type RunCriticWithToolsInput struct {
+	TaskID              string
+	WorkflowID          string
+	RunID               string
+	Query               string
+	Model               string
+	Temperature          float64
+	MaxCompletionTokens  int
+	PlannerOutput        string
+	ResearcherOutput     string
+	CurrentAnswer        string
+	EnableTools          bool
+}
+
+// RunCriticWithToolsOutput is the output from critic with step-level tool tracking
+type RunCriticWithToolsOutput struct {
+	Step             AgentStep
+	LLMOutput        string
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+	LatencyMS        int64
+	ToolSteps        []AgentToolStep
+	ToolUsed         bool
+}
+
+// RunSynthesizerWithToolsInput is the input for synthesizer with step-level tool tracking
+type RunSynthesizerWithToolsInput struct {
+	TaskID              string
+	WorkflowID          string
+	RunID               string
+	Query               string
+	Model               string
+	Temperature          float64
+	MaxCompletionTokens  int
+	PlannerOutput        string
+	ResearcherOutput     string
+	CriticOutput         string
+	EnableTools          bool
+}
+
+// RunSynthesizerWithToolsOutput is the output from synthesizer with step-level tool tracking
+type RunSynthesizerWithToolsOutput struct {
+	Step             AgentStep
+	LLMOutput        string
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+	LatencyMS        int64
+	ToolSteps        []AgentToolStep
+	ToolUsed         bool
+}
+
+// AgentToolStep represents a single tool execution step within an agent
+type AgentToolStep struct {
+	TaskID          string    `json:"task_id"`
+	AgentRole       string    `json:"agent_role"`
+	StepID          int       `json:"step_id"`
+	ToolName        string    `json:"tool_name"`
+	Arguments       string    `json:"arguments,omitempty"`
+	Output          string    `json:"output,omitempty"`
+	Status          string    `json:"status"` // "started" | "completed" | "failed"
+	LatencyMs       int64     `json:"latency_ms"`
+	PromptTokens    int       `json:"prompt_tokens,omitempty"`
+	CompletionTokens int      `json:"completion_tokens,omitempty"`
+	TotalTokens     int       `json:"total_tokens,omitempty"`
+	Error           string    `json:"error,omitempty"`
+	Timestamp       string    `json:"timestamp,omitempty"`
 }

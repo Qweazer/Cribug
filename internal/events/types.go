@@ -24,6 +24,9 @@ const (
 	EventTypeToolStarted           = "TOOL_STARTED"
 	EventTypeToolCompleted         = "TOOL_COMPLETED"
 	EventTypeToolFailed            = "TOOL_FAILED"
+	EventTypeToolStepStarted       = "TOOL_STEP_STARTED"
+	EventTypeToolStepCompleted     = "TOOL_STEP_COMPLETED"
+	EventTypeToolStepFailed        = "TOOL_STEP_FAILED"
 )
 
 type AgentEvent struct {
@@ -243,5 +246,43 @@ func NewToolUsageSummaryEvent(taskID, agentRole string, callCount, successCount,
 		"total_latency":  totalLatencyMs,
 		"tool_names":     toolNames,
 		"timestamp":      time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewToolStepStartedEvent(taskID, agentRole string, stepID int, toolName string, arguments map[string]interface{}) AgentEvent {
+	return NewAgentEvent(EventTypeToolStepStarted, map[string]interface{}{
+		"task_id":    taskID,
+		"agent_role": agentRole,
+		"step_id":    stepID,
+		"tool_name":  toolName,
+		"arguments":  arguments,
+		"timestamp":  time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewToolStepCompletedEvent(taskID, agentRole string, stepID int, toolName, output string, latencyMs int64, promptTokens, completionTokens, totalTokens int) AgentEvent {
+	return NewAgentEvent(EventTypeToolStepCompleted, map[string]interface{}{
+		"task_id":          taskID,
+		"agent_role":       agentRole,
+		"step_id":          stepID,
+		"tool_name":         toolName,
+		"output":           output,
+		"latency_ms":       latencyMs,
+		"prompt_tokens":    promptTokens,
+		"completion_tokens": completionTokens,
+		"total_tokens":     totalTokens,
+		"timestamp":        time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewToolStepFailedEvent(taskID, agentRole string, stepID int, toolName, errorMsg string, latencyMs int64) AgentEvent {
+	return NewAgentEvent(EventTypeToolStepFailed, map[string]interface{}{
+		"task_id":    taskID,
+		"agent_role": agentRole,
+		"step_id":    stepID,
+		"tool_name":  toolName,
+		"error":      errorMsg,
+		"latency_ms": latencyMs,
+		"timestamp":  time.Now().UTC().Format(time.RFC3339),
 	})
 }

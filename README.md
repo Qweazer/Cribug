@@ -226,6 +226,36 @@ ENABLE_DAG_WORKFLOW=true bash scripts/test_dag_plan.sh
 
 Note: DAG node execution and synthesis are in Slice 4.4+.
 
+## Tool Integration (Phase 3C)
+
+With `ENABLE_TOOLS=true`, setting `config.enable_tools=true` enables tool calling. Tool integration:
+- Emits TOOL_CALL_STARTED, TOOL_CALL_COMPLETED/TOOL_CALL_FAILED events
+- Supports calculator and echo tools
+- Records tool usage to tasks table (tool_name, tool_call_id, tool_result)
+- Redis SSE/Stream events for tool lifecycle
+
+```bash
+# Test tool calling (requires ENABLE_TOOLS=true on Gateway and Worker)
+ENABLE_TOOLS=true bash scripts/test_tools.sh
+```
+
+## Stepwise Tool Execution Metrics (Phase 3D Slice 8.0)
+
+Tool execution tracking with per-step granularity:
+
+- **Events emitted:**
+  - TOOL_STEP_STARTED: tool_name, step_id, tool_call_id, latency_ms
+  - TOOL_STEP_COMPLETED: tool_name, step_id, tool_call_id, latency_ms, result_length
+  - TOOL_STEP_FAILED: tool_name, step_id, tool_call_id, latency_ms, error
+- **Per-step latency tracking:** Each step records its own latency_ms
+- **Agent-level step_id sequencing:** step_id increments per agent (agent1_step_1, agent1_step_2, etc.)
+- **Workflow result includes stepwise tool execution明细:** Tool execution details in result.tool_executions
+
+```bash
+# Test stepwise tool metrics
+ENABLE_TOOLS=true ENABLE_MULTI_AGENT=true bash scripts/test_stepwise_tool_metrics.sh
+```
+
 ### Get Task Status
 
 ```bash
