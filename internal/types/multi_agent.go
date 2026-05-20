@@ -114,4 +114,50 @@ type RunResearcherAgentOutput struct {
 	CompletionTokens int
 	TotalTokens     int
 	LatencyMS       int64
+	ToolResult      *ToolResult `json:"tool_result,omitempty"`
+}
+
+// RunResearcherWithToolsInput is the input for researcher with tool calling capability
+type RunResearcherWithToolsInput struct {
+	TaskID              string
+	WorkflowID          string
+	RunID               string
+	Query               string
+	Model               string
+	Temperature          float64
+	MaxCompletionTokens  int
+	PlannerOutput        string
+	EnableTools          bool
+}
+
+// RunResearcherWithToolsOutput is the output from researcher with tool calling
+type RunResearcherWithToolsOutput struct {
+	Step       AgentStep
+	LLMOutput  string
+	PromptTokens    int
+	CompletionTokens int
+	TotalTokens     int
+	LatencyMS       int64
+	ToolResult      *ToolResult `json:"tool_result,omitempty"`
+	ToolUsed        bool        `json:"tool_used"`
+}
+
+// AgentToolUsage represents tool usage statistics for an agent
+type AgentToolUsage struct {
+	AgentRole    AgentRole `json:"agent_role"`
+	CallCount    int       `json:"call_count"`
+	SuccessCount int       `json:"success_count"`
+	FailureCount int       `json:"failure_count"`
+	TotalLatency int       `json:"total_latency_ms"`
+	ToolNames    []string  `json:"tool_names"`
+}
+
+// WorkflowToolSummary aggregates tool usage across all agents in the workflow
+type WorkflowToolSummary struct {
+	TaskID        string            `json:"task_id"`
+	TotalCalls    int               `json:"total_calls"`
+	TotalSuccesses int               `json:"total_successes"`
+	TotalFailures int               `json:"total_failures"`
+	TotalLatency   int               `json:"total_latency_ms"`
+	AgentStats    []AgentToolUsage  `json:"agent_stats"`
 }

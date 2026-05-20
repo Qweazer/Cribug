@@ -82,6 +82,10 @@ func main() {
 	w.RegisterActivityWithOptions(multiAgentActivities.RunCriticAgent, activity.RegisterOptions{Name: "RunCriticAgentActivity"})
 	w.RegisterActivityWithOptions(multiAgentActivities.RunSynthesizerAgent, activity.RegisterOptions{Name: "RunSynthesizerAgentActivity"})
 
+	// Phase 3C: Tool Activities
+	toolActivities := activities.NewToolActivities()
+	w.RegisterActivityWithOptions(toolActivities.ExecuteTool, activity.RegisterOptions{Name: "ExecuteToolActivity"})
+
 	log.Printf("worker started, task_queue=%s", cfg.TemporalTaskQueue)
 	if err := w.Run(worker.InterruptCh()); err != nil {
 		log.Fatalf("worker error: %v", err)

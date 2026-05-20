@@ -4,7 +4,7 @@ import time
 
 app = FastAPI()
 
-# Role-based system prompts
+# Role-based system prompts (safe, non-sensitive content)
 ROLE_PROMPTS = {
     None: "You are a helpful assistant.",
     "planner": "You are a planner agent. Break down the user's query into a short plan.",
@@ -13,13 +13,13 @@ ROLE_PROMPTS = {
     "synthesizer": "You are a synthesizer agent. Combine the original query, intermediate outputs, and critique into a final polished answer.",
 }
 
-# Mock responses for different roles
+# Mock responses for different roles (safe, non-sensitive, short content)
 ROLE_MOCK_RESPONSES = {
-    None: "Here is a helpful response to your question.",
-    "planner": "Based on your query, I recommend breaking this down into 2-3 steps. First, we gather information. Then we analyze. Finally, we synthesize a solution.",
-    "researcher": "After researching this topic, I found several key points: (1) context matters, (2) structure helps clarity, (3) synthesis produces better outcomes.",
-    "critic": "The current answer has several strengths but also areas for improvement: Strengths: clear structure, good examples. Areas for improvement: could address edge cases more thoroughly, and the conclusion could be more actionable.",
-    "synthesizer": "In summary, synthesizing the analysis and critique: the best approach involves structured thinking, addressing concerns raised by the critique, and delivering a clear actionable conclusion.",
+    None: "Safe mock response.",
+    "planner": "Plan: analyze query, gather info, synthesize answer.",
+    "researcher": "Key points: structure, clarity, synthesis.",
+    "critic": "Strengths: clear structure. Improvements: address edge cases.",
+    "synthesizer": "Final answer: structured approach with actionable conclusion.",
 }
 
 

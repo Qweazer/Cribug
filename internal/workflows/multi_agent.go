@@ -64,6 +64,28 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 	// Track outputs from each agent
 	var plannerOutput string
 
+	// Track tool usage statistics for each agent (Slice 7.0)
+	type agentToolStats struct {
+		callCount    int
+		successCount int
+		failureCount int
+		totalLatency int
+		toolNames    []string
+	}
+	researcherToolStats := agentToolStats{}
+	criticToolStats := agentToolStats{}
+	synthesizerToolStats := agentToolStats{}
+
+	// Helper function to emit tool usage summary for an agent
+	emitToolUsageSummary := func(role string, stats agentToolStats) {
+		if stats.callCount > 0 {
+			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+				TaskID: req.TaskID,
+				Event:  events.NewToolUsageSummaryEvent(req.TaskID, role, stats.callCount, stats.successCount, stats.failureCount, stats.totalLatency, stats.toolNames),
+			}).Get(ctx, nil)
+		}
+	}
+
 	// 4. Execute planner (mock)
 	logger.Info("Executing planner (mock)")
 	err = workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
@@ -176,13 +198,117 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 		}
 	}
 
-	// Emit AGENT_STARTED for researcher
+	// Check if tools are enabled
+	enableTools := false
+	if req.Config != nil && req.Config.EnableTools != nil {
+		enableTools = *req.Config.EnableTools
+	}
+
+	// Emit AGENT_STARTED for researcher first
 	err = workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 		TaskID: req.TaskID,
 		Event:  events.NewAgentStartedEvent(req.TaskID, string(types.AgentRoleResearcher), 2),
 	}).Get(ctx, nil)
 	if err != nil {
 		logger.Error("EmitEventActivity (AGENT_STARTED researcher) failed", "error", err)
+	}
+
+	// Detect tool intent if tools are enabled
+	var toolDecision types.ToolDecision
+	if enableTools {
+		toolDecision = types.DetectToolIntent(req.Query)
+	}
+
+	// Handle tool execution if detected (before LLM call)
+	var toolResult *types.ToolResult
+	if toolDecision.Matched {
+		logger.Info("Researcher detected tool", "tool_name", toolDecision.ToolName)
+
+		// Emit TOOL_STARTED
+		workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+			TaskID: req.TaskID,
+			Event:  events.NewToolStartedEvent(req.TaskID, toolDecision.ToolName, toolDecision.Arguments),
+		}).Get(ctx, nil)
+
+		// Execute tool via ExecuteToolActivity
+		var executeToolResult *types.ToolResult
+		err = workflow.ExecuteActivity(ctx, "ExecuteToolActivity", activities.ToolExecuteInput{
+			TaskID:    req.TaskID,
+			ToolName:  toolDecision.ToolName,
+			Arguments: toolDecision.Arguments,
+		}).Get(ctx, &executeToolResult)
+
+		if err != nil {
+			logger.Error("ExecuteToolActivity failed", "error", err)
+		}
+
+		// Check tool execution result
+		if executeToolResult != nil && executeToolResult.Error != "" {
+			logger.Warn("Tool execution failed", "tool_name", toolDecision.ToolName, "error", executeToolResult.Error)
+
+			// Track researcher tool usage statistics (Slice 7.0)
+			researcherToolStats.callCount++
+			researcherToolStats.failureCount++
+			researcherToolStats.totalLatency += executeToolResult.LatencyMs
+			researcherToolStats.toolNames = append(researcherToolStats.toolNames, toolDecision.ToolName)
+
+			// Emit TOOL_FAILED
+			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+				TaskID: req.TaskID,
+				Event:  events.NewToolFailedEvent(req.TaskID, toolDecision.ToolName, executeToolResult.Error),
+			}).Get(ctx, nil)
+
+			// Emit AGENT_COMPLETED for researcher (interrupted by tool failure)
+			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+				TaskID: req.TaskID,
+				Event:  events.NewAgentCompletedEvent(req.TaskID, string(types.AgentRoleResearcher), "failed", ""),
+			}).Get(ctx, nil)
+
+			// Save failure - tool_error type
+			workflow.ExecuteActivity(ctx, "SaveFailureActivity", activities.SaveFailureInput{
+				TaskID:    req.TaskID,
+				ErrorType: types.ErrorTypeTool,
+				ErrorMsg:  executeToolResult.Error,
+			}).Get(ctx, nil)
+
+			workflow.ExecuteActivity(ctx, "RecordExecutionFailedActivity", activities.RecordExecutionFailedInput{
+				TaskID:     req.TaskID,
+				WorkflowID: req.WorkflowID,
+				RunID:      req.RunID,
+				ErrorType:  types.ErrorTypeTool,
+				ErrorMsg:   executeToolResult.Error,
+			}).Get(ctx, nil)
+
+			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+				TaskID: req.TaskID,
+				Event:  events.NewTaskFailedEvent(req.TaskID, req.WorkflowID, executeToolResult.Error),
+			}).Get(ctx, nil)
+
+			return &types.WorkflowTaskResult{
+				TaskID:  req.TaskID,
+				Status:  types.TaskStatusFailed,
+				Answer:  "",
+				Error:   executeToolResult.Error,
+			}, nil
+		}
+
+		// Tool succeeded - emit TOOL_COMPLETED
+		if executeToolResult != nil {
+			// Track researcher tool usage statistics (Slice 7.0)
+			researcherToolStats.callCount++
+			researcherToolStats.successCount++
+			researcherToolStats.totalLatency += executeToolResult.LatencyMs
+			researcherToolStats.toolNames = append(researcherToolStats.toolNames, toolDecision.ToolName)
+
+			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+				TaskID: req.TaskID,
+				Event:  events.NewToolCompletedEvent(req.TaskID, executeToolResult.ToolName, executeToolResult.Output, executeToolResult.LatencyMs),
+			}).Get(ctx, nil)
+
+			// Store tool result for merging
+			toolResult = executeToolResult
+			logger.Info("Tool executed successfully", "tool_name", toolDecision.ToolName, "output", executeToolResult.Output)
+		}
 	}
 
 	// Emit LLM_STARTED - only after budget check passes
@@ -241,29 +367,45 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 		Event:  events.NewUsageRecordedEvent(req.TaskID, researcherOutput.TotalTokens),
 	}).Get(ctx, nil)
 
+	// Emit TOOL_USAGE_SUMMARY for researcher (Slice 7.0)
+	emitToolUsageSummary(string(types.AgentRoleResearcher), researcherToolStats)
+
 	// Emit AGENT_COMPLETED for researcher
+	var researcherFinalOutput string
+	if toolResult != nil {
+		// Merge tool result with researcher output (Slice 7.0: include stats)
+		toolSummary := fmt.Sprintf("Tools: %d calls, %d success, %d failed",
+			researcherToolStats.callCount, researcherToolStats.successCount, researcherToolStats.failureCount)
+		researcherFinalOutput = researcherOutput.LLMOutput + "\n\n[Tool " + toolResult.ToolName + " result: " + toolResult.Output + "]\n[" + toolSummary + "]"
+	} else {
+		researcherFinalOutput = researcherOutput.LLMOutput
+	}
+
 	err = workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 		TaskID: req.TaskID,
-		Event:  events.NewAgentCompletedEvent(req.TaskID, string(types.AgentRoleResearcher), "completed", researcherOutput.LLMOutput),
+		Event:  events.NewAgentCompletedEvent(req.TaskID, string(types.AgentRoleResearcher), "completed", researcherFinalOutput),
 	}).Get(ctx, nil)
 	if err != nil {
 		logger.Error("EmitEventActivity (AGENT_COMPLETED researcher) failed", "error", err)
 	}
 
-	logger.Info("Researcher completed", "tokens", researcherOutput.TotalTokens)
+	logger.Info("Researcher completed", "tokens", researcherOutput.TotalTokens, "tool_used", toolResult != nil)
 
-	// Track accumulated tokens for budget check
+	// Track accumulated tokens for budget check (tool usage adds minimal tokens)
 	accumulatedTokens := researcherOutput.TotalTokens
+	if toolResult != nil {
+		accumulatedTokens += 10 // Tool result tokens estimate
+	}
 
 	// 6. Execute critic (LLM-backed) with budget check considering researcher usage
 	logger.Info("Executing critic (LLM-backed)")
 
-	// Estimate prompt tokens for critic (including researcher output)
-	samplePrompt = req.Query + " " + plannerOutput + " " + researcherOutput.LLMOutput
+	// Estimate prompt tokens for critic (including researcher output + tool result if any)
+	criticPrompt := req.Query + " " + plannerOutput + " " + researcherFinalOutput
 	var criticEstOutput *activities.EstimatePromptTokensOutput
 	err = workflow.ExecuteActivity(ctx, "EstimatePromptTokensActivity", activities.EstimatePromptTokensInput{
 		Model: req.Model,
-		Text:  samplePrompt,
+		Text:  criticPrompt,
 	}).Get(ctx, &criticEstOutput)
 	if err != nil {
 		logger.Warn("EstimatePromptTokensActivity failed for critic", "error", err)
@@ -314,13 +456,107 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 		}
 	}
 
-	// Emit AGENT_STARTED for critic
+	// Emit AGENT_STARTED for critic first
 	err = workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 		TaskID: req.TaskID,
 		Event:  events.NewAgentStartedEvent(req.TaskID, string(types.AgentRoleCritic), 3),
 	}).Get(ctx, nil)
 	if err != nil {
 		logger.Error("EmitEventActivity (AGENT_STARTED critic) failed", "error", err)
+	}
+
+	// Detect tool intent for critic if tools are enabled
+	var criticToolResult *types.ToolResult
+	if enableTools {
+		criticToolDecision := types.DetectToolIntent(req.Query)
+		if criticToolDecision.Matched {
+			logger.Info("Critic detected tool", "tool_name", criticToolDecision.ToolName)
+
+			// Emit TOOL_STARTED
+			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+				TaskID: req.TaskID,
+				Event:  events.NewToolStartedEvent(req.TaskID, criticToolDecision.ToolName, criticToolDecision.Arguments),
+			}).Get(ctx, nil)
+
+			// Execute tool via ExecuteToolActivity
+			var executeToolResult *types.ToolResult
+			err = workflow.ExecuteActivity(ctx, "ExecuteToolActivity", activities.ToolExecuteInput{
+				TaskID:    req.TaskID,
+				ToolName:  criticToolDecision.ToolName,
+				Arguments: criticToolDecision.Arguments,
+			}).Get(ctx, &executeToolResult)
+
+			if err != nil {
+				logger.Error("ExecuteToolActivity failed for critic", "error", err)
+			}
+
+			// Check tool execution result
+			if executeToolResult != nil && executeToolResult.Error != "" {
+				logger.Warn("Critic tool execution failed", "tool_name", criticToolDecision.ToolName, "error", executeToolResult.Error)
+
+				// Track critic tool usage statistics (Slice 7.0)
+				criticToolStats.callCount++
+				criticToolStats.failureCount++
+				criticToolStats.totalLatency += executeToolResult.LatencyMs
+				criticToolStats.toolNames = append(criticToolStats.toolNames, criticToolDecision.ToolName)
+
+				// Emit TOOL_FAILED
+				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+					TaskID: req.TaskID,
+					Event:  events.NewToolFailedEvent(req.TaskID, criticToolDecision.ToolName, executeToolResult.Error),
+				}).Get(ctx, nil)
+
+				// Emit AGENT_COMPLETED for critic (interrupted by tool failure)
+				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+					TaskID: req.TaskID,
+					Event:  events.NewAgentCompletedEvent(req.TaskID, string(types.AgentRoleCritic), "failed", ""),
+				}).Get(ctx, nil)
+
+				// Save failure - tool_error type
+				workflow.ExecuteActivity(ctx, "SaveFailureActivity", activities.SaveFailureInput{
+					TaskID:    req.TaskID,
+					ErrorType: types.ErrorTypeTool,
+					ErrorMsg:  executeToolResult.Error,
+				}).Get(ctx, nil)
+
+				workflow.ExecuteActivity(ctx, "RecordExecutionFailedActivity", activities.RecordExecutionFailedInput{
+					TaskID:     req.TaskID,
+					WorkflowID: req.WorkflowID,
+					RunID:      req.RunID,
+					ErrorType:  types.ErrorTypeTool,
+					ErrorMsg:   executeToolResult.Error,
+				}).Get(ctx, nil)
+
+				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+					TaskID: req.TaskID,
+					Event:  events.NewTaskFailedEvent(req.TaskID, req.WorkflowID, executeToolResult.Error),
+				}).Get(ctx, nil)
+
+				return &types.WorkflowTaskResult{
+					TaskID:  req.TaskID,
+					Status:  types.TaskStatusFailed,
+					Answer:  "",
+					Error:   executeToolResult.Error,
+				}, nil
+			}
+
+			// Tool succeeded - emit TOOL_COMPLETED
+			if executeToolResult != nil {
+				// Track critic tool usage statistics (Slice 7.0)
+				criticToolStats.callCount++
+				criticToolStats.successCount++
+				criticToolStats.totalLatency += executeToolResult.LatencyMs
+				criticToolStats.toolNames = append(criticToolStats.toolNames, criticToolDecision.ToolName)
+
+				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+					TaskID: req.TaskID,
+					Event:  events.NewToolCompletedEvent(req.TaskID, executeToolResult.ToolName, executeToolResult.Output, executeToolResult.LatencyMs),
+				}).Get(ctx, nil)
+
+				criticToolResult = executeToolResult
+				logger.Info("Critic tool executed successfully", "tool_name", criticToolDecision.ToolName, "output", executeToolResult.Output)
+			}
+		}
 	}
 
 	// Emit LLM_STARTED for critic
@@ -340,8 +576,8 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 		Temperature:         req.Temperature,
 		MaxCompletionTokens: criticBudgetOutput.AllowedCompletionTokens,
 		PlannerOutput:       plannerOutput,
-		ResearcherOutput:    researcherOutput.LLMOutput,
-		CurrentAnswer:       researcherOutput.LLMOutput,
+		ResearcherOutput:    researcherFinalOutput,
+		CurrentAnswer:       researcherFinalOutput,
 	}).Get(ctx, &criticOutput)
 
 	if err != nil {
@@ -380,10 +616,23 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 		Event:  events.NewUsageRecordedEvent(req.TaskID, criticOutput.TotalTokens),
 	}).Get(ctx, nil)
 
+	// Emit TOOL_USAGE_SUMMARY for critic (Slice 7.0)
+	emitToolUsageSummary(string(types.AgentRoleCritic), criticToolStats)
+
 	// Emit AGENT_COMPLETED for critic
+	var criticFinalOutput string
+	if criticToolResult != nil {
+		// Merge tool result with critic output (Slice 7.0: include stats)
+		toolSummary := fmt.Sprintf("Tools: %d calls, %d success, %d failed",
+			criticToolStats.callCount, criticToolStats.successCount, criticToolStats.failureCount)
+		criticFinalOutput = criticOutput.LLMOutput + "\n\n[Tool " + criticToolResult.ToolName + " result: " + criticToolResult.Output + "]\n[" + toolSummary + "]"
+	} else {
+		criticFinalOutput = criticOutput.LLMOutput
+	}
+
 	err = workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 		TaskID: req.TaskID,
-		Event:  events.NewAgentCompletedEvent(req.TaskID, string(types.AgentRoleCritic), "completed", criticOutput.LLMOutput),
+		Event:  events.NewAgentCompletedEvent(req.TaskID, string(types.AgentRoleCritic), "completed", criticFinalOutput),
 	}).Get(ctx, nil)
 	if err != nil {
 		logger.Error("EmitEventActivity (AGENT_COMPLETED critic) failed", "error", err)
@@ -392,19 +641,22 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 	// Emit CRITIC_REVIEWED
 	workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 		TaskID: req.TaskID,
-		Event:  events.NewCriticReviewedEvent(req.TaskID, criticOutput.LLMOutput),
+		Event:  events.NewCriticReviewedEvent(req.TaskID, criticFinalOutput),
 	}).Get(ctx, nil)
 
-	logger.Info("Critic completed", "tokens", criticOutput.TotalTokens)
+	logger.Info("Critic completed", "tokens", criticOutput.TotalTokens, "tool_used", criticToolResult != nil)
 
-	// Update accumulated tokens
+	// Update accumulated tokens (include tool result tokens estimate)
 	accumulatedTokens += criticOutput.TotalTokens
+	if criticToolResult != nil {
+		accumulatedTokens += 10
+	}
 
 	// 7. Execute synthesizer (LLM-backed)
 	logger.Info("Executing synthesizer (LLM-backed)")
 
 	// Estimate prompt tokens for synthesizer (including researcher + critic output)
-	synthSamplePrompt := req.Query + " " + plannerOutput + " " + researcherOutput.LLMOutput + " " + criticOutput.LLMOutput
+	synthSamplePrompt := req.Query + " " + plannerOutput + " " + researcherFinalOutput + " " + criticFinalOutput
 	var synthEstOutput *activities.EstimatePromptTokensOutput
 	err = workflow.ExecuteActivity(ctx, "EstimatePromptTokensActivity", activities.EstimatePromptTokensInput{
 		Model: req.Model,
@@ -459,13 +711,107 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 		}
 	}
 
-	// Emit AGENT_STARTED for synthesizer
+	// Emit AGENT_STARTED for synthesizer first
 	err = workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 		TaskID: req.TaskID,
 		Event:  events.NewAgentStartedEvent(req.TaskID, string(types.AgentRoleSynthesizer), 4),
 	}).Get(ctx, nil)
 	if err != nil {
 		logger.Error("EmitEventActivity (AGENT_STARTED synthesizer) failed", "error", err)
+	}
+
+	// Detect tool intent for synthesizer if tools are enabled
+	var synthToolResult *types.ToolResult
+	if enableTools {
+		synthToolDecision := types.DetectToolIntent(req.Query)
+		if synthToolDecision.Matched {
+			logger.Info("Synthesizer detected tool", "tool_name", synthToolDecision.ToolName)
+
+			// Emit TOOL_STARTED
+			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+				TaskID: req.TaskID,
+				Event:  events.NewToolStartedEvent(req.TaskID, synthToolDecision.ToolName, synthToolDecision.Arguments),
+			}).Get(ctx, nil)
+
+			// Execute tool via ExecuteToolActivity
+			var executeToolResult *types.ToolResult
+			err = workflow.ExecuteActivity(ctx, "ExecuteToolActivity", activities.ToolExecuteInput{
+				TaskID:    req.TaskID,
+				ToolName:  synthToolDecision.ToolName,
+				Arguments: synthToolDecision.Arguments,
+			}).Get(ctx, &executeToolResult)
+
+			if err != nil {
+				logger.Error("ExecuteToolActivity failed for synthesizer", "error", err)
+			}
+
+			// Check tool execution result
+			if executeToolResult != nil && executeToolResult.Error != "" {
+				logger.Warn("Synthesizer tool execution failed", "tool_name", synthToolDecision.ToolName, "error", executeToolResult.Error)
+
+				// Track synthesizer tool usage statistics (Slice 7.0)
+				synthesizerToolStats.callCount++
+				synthesizerToolStats.failureCount++
+				synthesizerToolStats.totalLatency += executeToolResult.LatencyMs
+				synthesizerToolStats.toolNames = append(synthesizerToolStats.toolNames, synthToolDecision.ToolName)
+
+				// Emit TOOL_FAILED
+				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+					TaskID: req.TaskID,
+					Event:  events.NewToolFailedEvent(req.TaskID, synthToolDecision.ToolName, executeToolResult.Error),
+				}).Get(ctx, nil)
+
+				// Emit AGENT_COMPLETED for synthesizer (interrupted by tool failure)
+				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+					TaskID: req.TaskID,
+					Event:  events.NewAgentCompletedEvent(req.TaskID, string(types.AgentRoleSynthesizer), "failed", ""),
+				}).Get(ctx, nil)
+
+				// Save failure - tool_error type
+				workflow.ExecuteActivity(ctx, "SaveFailureActivity", activities.SaveFailureInput{
+					TaskID:    req.TaskID,
+					ErrorType: types.ErrorTypeTool,
+					ErrorMsg:  executeToolResult.Error,
+				}).Get(ctx, nil)
+
+				workflow.ExecuteActivity(ctx, "RecordExecutionFailedActivity", activities.RecordExecutionFailedInput{
+					TaskID:     req.TaskID,
+					WorkflowID: req.WorkflowID,
+					RunID:      req.RunID,
+					ErrorType:  types.ErrorTypeTool,
+					ErrorMsg:   executeToolResult.Error,
+				}).Get(ctx, nil)
+
+				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+					TaskID: req.TaskID,
+					Event:  events.NewTaskFailedEvent(req.TaskID, req.WorkflowID, executeToolResult.Error),
+				}).Get(ctx, nil)
+
+				return &types.WorkflowTaskResult{
+					TaskID:  req.TaskID,
+					Status:  types.TaskStatusFailed,
+					Answer:  "",
+					Error:   executeToolResult.Error,
+				}, nil
+			}
+
+			// Tool succeeded - emit TOOL_COMPLETED
+			if executeToolResult != nil {
+				// Track synthesizer tool usage statistics (Slice 7.0)
+				synthesizerToolStats.callCount++
+				synthesizerToolStats.successCount++
+				synthesizerToolStats.totalLatency += executeToolResult.LatencyMs
+				synthesizerToolStats.toolNames = append(synthesizerToolStats.toolNames, synthToolDecision.ToolName)
+
+				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+					TaskID: req.TaskID,
+					Event:  events.NewToolCompletedEvent(req.TaskID, executeToolResult.ToolName, executeToolResult.Output, executeToolResult.LatencyMs),
+				}).Get(ctx, nil)
+
+				synthToolResult = executeToolResult
+				logger.Info("Synthesizer tool executed successfully", "tool_name", synthToolDecision.ToolName, "output", executeToolResult.Output)
+			}
+		}
 	}
 
 	// Emit LLM_STARTED for synthesizer
@@ -485,8 +831,8 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 		Temperature:         req.Temperature,
 		MaxCompletionTokens: synthBudgetOutput.AllowedCompletionTokens,
 		PlannerOutput:       plannerOutput,
-		ResearcherOutput:    researcherOutput.LLMOutput,
-		CriticOutput:        criticOutput.LLMOutput,
+		ResearcherOutput:    researcherFinalOutput,
+		CriticOutput:        criticFinalOutput,
 	}).Get(ctx, &synthesizerOutput)
 
 	if err != nil {
@@ -529,24 +875,44 @@ func (mw *MultiAgentWorkflow) Execute(ctx workflow.Context, req types.WorkflowTa
 		Event:  events.NewUsageRecordedEvent(req.TaskID, synthesizerOutput.TotalTokens),
 	}).Get(ctx, nil)
 
+	// Emit TOOL_USAGE_SUMMARY for synthesizer (Slice 7.0)
+	emitToolUsageSummary(string(types.AgentRoleSynthesizer), synthesizerToolStats)
+
 	// Emit AGENT_COMPLETED for synthesizer
+	var synthesizerFinalOutput string
+	if synthToolResult != nil {
+		// Merge tool result with synthesizer output (Slice 7.0: include stats)
+		toolSummary := fmt.Sprintf("Tools: %d calls, %d success, %d failed",
+			synthesizerToolStats.callCount, synthesizerToolStats.successCount, synthesizerToolStats.failureCount)
+		synthesizerFinalOutput = synthesizerOutput.LLMOutput + "\n\n[Tool " + synthToolResult.ToolName + " result: " + synthToolResult.Output + "]\n[" + toolSummary + "]"
+	} else {
+		synthesizerFinalOutput = synthesizerOutput.LLMOutput
+	}
+
 	err = workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 		TaskID: req.TaskID,
-		Event:  events.NewAgentCompletedEvent(req.TaskID, string(types.AgentRoleSynthesizer), "completed", synthesizerOutput.LLMOutput),
+		Event:  events.NewAgentCompletedEvent(req.TaskID, string(types.AgentRoleSynthesizer), "completed", synthesizerFinalOutput),
 	}).Get(ctx, nil)
 	if err != nil {
 		logger.Error("EmitEventActivity (AGENT_COMPLETED synthesizer) failed", "error", err)
 	}
 
-	logger.Info("Synthesizer completed", "tokens", synthesizerOutput.TotalTokens)
+	logger.Info("Synthesizer completed", "tokens", synthesizerOutput.TotalTokens, "tool_used", synthToolResult != nil)
 
 	// Update accumulated tokens
 	accumulatedTokens += synthesizerOutput.TotalTokens
+	if synthToolResult != nil {
+		accumulatedTokens += 10
+	}
 
 	// 8. Emit MULTI_AGENT_SYNTHESIZED
+	// Count how many tools were used and aggregate stats (Slice 7.0)
+	totalToolCalls := researcherToolStats.callCount + criticToolStats.callCount + synthesizerToolStats.callCount
+	completedCount := 4 + totalToolCalls // base 4 agents + any tools used
+
 	err = workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 		TaskID: req.TaskID,
-		Event:  events.NewMultiAgentSynthesizedEvent(req.TaskID, 4, 4, accumulatedTokens),
+		Event:  events.NewMultiAgentSynthesizedEvent(req.TaskID, completedCount, completedCount, accumulatedTokens),
 	}).Get(ctx, nil)
 	if err != nil {
 		logger.Error("EmitEventActivity (MULTI_AGENT_SYNTHESIZED) failed", "error", err)

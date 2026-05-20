@@ -21,6 +21,9 @@ const (
 	EventTypeAgentCompleted        = "AGENT_COMPLETED"
 	EventTypeMultiAgentSynthesized = "MULTI_AGENT_SYNTHESIZED"
 	EventTypeCriticReviewed        = "CRITIC_REVIEWED"
+	EventTypeToolStarted           = "TOOL_STARTED"
+	EventTypeToolCompleted         = "TOOL_COMPLETED"
+	EventTypeToolFailed            = "TOOL_FAILED"
 )
 
 type AgentEvent struct {
@@ -199,5 +202,46 @@ func NewCriticReviewedEvent(taskID, critique string) AgentEvent {
 		"task_id":   taskID,
 		"critique":  critique,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewToolStartedEvent(taskID, toolName string, arguments map[string]interface{}) AgentEvent {
+	return NewAgentEvent(EventTypeToolStarted, map[string]interface{}{
+		"task_id":    taskID,
+		"tool_name":  toolName,
+		"arguments":  arguments,
+		"timestamp":  time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewToolCompletedEvent(taskID, toolName, output string, latencyMs int) AgentEvent {
+	return NewAgentEvent(EventTypeToolCompleted, map[string]interface{}{
+		"task_id":    taskID,
+		"tool_name":  toolName,
+		"output":     output,
+		"latency_ms": latencyMs,
+		"timestamp":  time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewToolFailedEvent(taskID, toolName, errorMsg string) AgentEvent {
+	return NewAgentEvent(EventTypeToolFailed, map[string]interface{}{
+		"task_id":    taskID,
+		"tool_name":  toolName,
+		"error":      errorMsg,
+		"timestamp":  time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewToolUsageSummaryEvent(taskID, agentRole string, callCount, successCount, failureCount, totalLatencyMs int, toolNames []string) AgentEvent {
+	return NewAgentEvent("TOOL_USAGE_SUMMARY", map[string]interface{}{
+		"task_id":        taskID,
+		"agent_role":     agentRole,
+		"call_count":     callCount,
+		"success_count":  successCount,
+		"failure_count":  failureCount,
+		"total_latency":  totalLatencyMs,
+		"tool_names":     toolNames,
+		"timestamp":      time.Now().UTC().Format(time.RFC3339),
 	})
 }
