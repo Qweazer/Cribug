@@ -39,11 +39,11 @@ sleep 2
 # 2. Verify result contains DAG completion
 log "2. Checking result..."
 RESULT=$(get_task_result "$TASK_ID")
-# 4.6+: result contains mock answer from LLM node synthesis
-if echo "$RESULT" | grep -qE "mock answer"; then
-  log "  Result: OK (DAG mode - mock answer)"
+# 4.6+: result contains helpful response from LLM node synthesis
+if echo "$RESULT" | grep -qE "helpful response"; then
+  log "  Result: OK (DAG mode - helpful response)"
 else
-  fail "Result does not contain mock answer: $RESULT"
+  fail "Result does not contain helpful response: $RESULT"
 fi
 
 # 3. Verify core events exist

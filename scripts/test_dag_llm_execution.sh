@@ -39,11 +39,11 @@ log "  Task completed: $STATUS"
 # Wait for events to be fully written to Redis
 sleep 2
 
-# 2. Verify result contains mock answer
+# 2. Verify result contains helpful response
 log "2. Checking result..."
 RESULT=$(get_task_result "$TASK_ID")
-echo "$RESULT" | grep -q "mock answer" || fail "Result does not contain mock answer: $RESULT"
-log "  Result: OK (mock answer present)"
+echo "$RESULT" | grep -q "helpful response" || fail "Result does not contain helpful response: $RESULT"
+log "  Result: OK (helpful response present)"
 
 # 3. Verify Redis events for this task_id
 log "3. Checking Redis events for task_id=$TASK_ID..."

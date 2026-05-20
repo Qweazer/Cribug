@@ -56,7 +56,110 @@ func (sw *SimpleWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskRe
 		Event:  events.NewSessionLoadedEvent(req.TaskID, sessionOutput.MessageCount),
 	}).Get(ctx, nil)
 
-	// 4. EstimatePromptTokensActivity
+	// 4. Check enable_tools from task config (default false)
+	enableTools := false
+	if req.Config != nil && req.Config.EnableTools != nil {
+		enableTools = *req.Config.EnableTools
+	}
+
+	// 4b. Detect tool intent if tools are enabled
+	var toolDecision types.ToolDecision
+	if enableTools {
+		toolDecision = types.DetectToolIntent(req.Query)
+	}
+
+	// 5. Handle tool execution if detected
+	if toolDecision.Matched {
+		logger.Info("Tool detected", "tool_name", toolDecision.ToolName, "task_id", req.TaskID)
+
+		// Emit TOOL_STARTED
+		workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+			TaskID: req.TaskID,
+			Event:  events.NewToolStartedEvent(req.TaskID, toolDecision.ToolName, toolDecision.Arguments),
+		}).Get(ctx, nil)
+
+		var toolResult *types.ToolResult
+		err = workflow.ExecuteActivity(ctx, "ExecuteToolActivity", activities.ToolExecuteInput{
+			TaskID:    req.TaskID,
+			ToolName:  toolDecision.ToolName,
+			Arguments: toolDecision.Arguments,
+		}).Get(ctx, &toolResult)
+		if err != nil {
+			logger.Error("ExecuteToolActivity failed", "error", err)
+		}
+
+		// Check if tool execution failed
+		if toolResult != nil && toolResult.Error != "" {
+			logger.Warn("Tool execution failed", "tool_name", toolDecision.ToolName, "error", toolResult.Error)
+
+			// Emit TOOL_FAILED
+			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+				TaskID: req.TaskID,
+				Event:  events.NewToolFailedEvent(req.TaskID, toolDecision.ToolName, toolResult.Error),
+			}).Get(ctx, nil)
+
+			workflow.ExecuteActivity(ctx, "SaveFailureActivity", activities.SaveFailureInput{
+				TaskID:    req.TaskID,
+				ErrorType: types.ErrorTypeTool,
+				ErrorMsg:  toolResult.Error,
+			}).Get(ctx, nil)
+
+			workflow.ExecuteActivity(ctx, "RecordExecutionFailedActivity", activities.RecordExecutionFailedInput{
+				TaskID:     req.TaskID,
+				WorkflowID: req.WorkflowID,
+				RunID:      req.RunID,
+				ErrorType:  types.ErrorTypeTool,
+				ErrorMsg:   toolResult.Error,
+			}).Get(ctx, nil)
+
+			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+				TaskID: req.TaskID,
+				Event:  events.NewTaskFailedEvent(req.TaskID, req.WorkflowID, toolResult.Error),
+			}).Get(ctx, nil)
+
+			return &types.WorkflowTaskResult{
+				TaskID:  req.TaskID,
+				Status:  types.TaskStatusFailed,
+				Answer:  "",
+				Error:   toolResult.Error,
+			}, nil
+		}
+
+		// Tool succeeded - emit TOOL_COMPLETED and merge result
+		if toolResult != nil {
+			// Emit TOOL_COMPLETED
+			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+				TaskID: req.TaskID,
+				Event:  events.NewToolCompletedEvent(req.TaskID, toolResult.ToolName, toolResult.Output, toolResult.LatencyMs),
+			}).Get(ctx, nil)
+
+			finalResult := "Tool " + toolResult.ToolName + " result: " + toolResult.Output
+
+			workflow.ExecuteActivity(ctx, "SaveResultActivity", activities.SaveResultInput{
+				TaskID: req.TaskID,
+				Result: finalResult,
+			}).Get(ctx, nil)
+
+			workflow.ExecuteActivity(ctx, "RecordExecutionCompletedActivity", activities.RecordExecutionInput{
+				TaskID:     req.TaskID,
+				WorkflowID: req.WorkflowID,
+				RunID:      req.RunID,
+			}).Get(ctx, nil)
+
+			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+				TaskID: req.TaskID,
+				Event:  events.NewTaskCompletedEvent(req.TaskID, req.WorkflowID),
+			}).Get(ctx, nil)
+
+			return &types.WorkflowTaskResult{
+				TaskID: req.TaskID,
+				Status: types.TaskStatusCompleted,
+				Answer: finalResult,
+			}, nil
+		}
+	}
+
+	// 6. EstimatePromptTokensActivity (if no tool matched or tool execution returned no result)
 	// Build text to estimate: session messages + current query
 	estInput := activities.EstimatePromptTokensInput{Model: req.Model}
 	if sessionOutput != nil {
@@ -72,7 +175,7 @@ func (sw *SimpleWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskRe
 		logger.Error("EstimatePromptTokensActivity failed", "error", err)
 	}
 
-	// 5. CheckBudgetActivity
+	// 7. CheckBudgetActivity
 	var budgetOutput *activities.CheckBudgetOutput
 	err = workflow.ExecuteActivity(ctx, "CheckBudgetActivity", activities.CheckBudgetInput{
 		EstimatedPromptTokens: estOutput.EstimatedPromptTokens,
@@ -83,7 +186,7 @@ func (sw *SimpleWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskRe
 		logger.Error("CheckBudgetActivity failed", "error", err)
 	}
 
-	// 6. If budget not allowed, return budget_exceeded
+	// 8. If budget not allowed, return budget_exceeded
 	if !budgetOutput.Allowed {
 		logger.Warn("Budget exceeded", "reason", budgetOutput.Reason)
 
@@ -114,7 +217,7 @@ func (sw *SimpleWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskRe
 		}, nil
 	}
 
-	// 7. Emit LLM_STARTED
+	// 9. Emit LLM_STARTED
 	err = workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 		TaskID: req.TaskID,
 		Event:  events.NewLLMStartedEvent(req.TaskID, req.Model),
@@ -123,7 +226,7 @@ func (sw *SimpleWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskRe
 		logger.Error("EmitEventActivity (LLM_STARTED) failed", "error", err)
 	}
 
-	// 8. AgentActivity
+	// 10. AgentActivity
 	var agentOutput *activities.AgentActivityOutput
 	err = workflow.ExecuteActivity(ctx, "AgentActivity", activities.AgentActivityInput{
 		TaskID:                  req.TaskID,
@@ -162,7 +265,7 @@ func (sw *SimpleWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskRe
 		return nil, err
 	}
 
-	// 9. Emit LLM_COMPLETED
+	// 11. Emit LLM_COMPLETED
 	err = workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 		TaskID: req.TaskID,
 		Event:  events.NewLLMCompletedEvent(req.TaskID, agentOutput.Model, agentOutput.FinishReason, agentOutput.LatencyMS),
@@ -171,7 +274,7 @@ func (sw *SimpleWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskRe
 		logger.Error("EmitEventActivity (LLM_COMPLETED) failed", "error", err)
 	}
 
-	// 10. RecordUsageActivity
+	// 12. RecordUsageActivity
 	err = workflow.ExecuteActivity(ctx, "RecordUsageActivity", activities.RecordUsageInput{
 		TaskID:                req.TaskID,
 		WorkflowID:           req.WorkflowID,
@@ -190,13 +293,13 @@ func (sw *SimpleWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskRe
 		logger.Error("RecordUsageActivity failed", "error", err)
 	}
 
-	// 11. Emit USAGE_RECORDED
+	// 13. Emit USAGE_RECORDED
 	workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 		TaskID: req.TaskID,
 		Event:  events.NewUsageRecordedEvent(req.TaskID, agentOutput.Usage.TotalTokens),
 	}).Get(ctx, nil)
 
-	// 12. Check post-LLM budget
+	// 14. Check post-LLM budget
 	if agentOutput.Usage.TotalTokens > req.MaxTotalTokens {
 		logger.Warn("Post-LLM budget exceeded", "total_tokens", agentOutput.Usage.TotalTokens, "max_total", req.MaxTotalTokens)
 
@@ -227,7 +330,7 @@ func (sw *SimpleWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskRe
 		}, nil
 	}
 
-	// 13. SaveSessionActivity
+	// 15. SaveSessionActivity
 	if req.SessionID != "" {
 		workflow.ExecuteActivity(ctx, "SaveSessionActivity", activities.SaveSessionInput{
 			TaskID:           req.TaskID,
@@ -237,7 +340,7 @@ func (sw *SimpleWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskRe
 		}).Get(ctx, nil)
 	}
 
-	// 14. SaveResultActivity with usage
+	// 16. SaveResultActivity with usage
 	promptTokens := agentOutput.Usage.PromptTokens
 	completionTokens := agentOutput.Usage.CompletionTokens
 	totalTokens := agentOutput.Usage.TotalTokens
@@ -273,7 +376,7 @@ func (sw *SimpleWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskRe
 		return nil, err
 	}
 
-	// 15. RecordExecutionCompletedActivity
+	// 17. RecordExecutionCompletedActivity
 	err = workflow.ExecuteActivity(ctx, "RecordExecutionCompletedActivity", activities.RecordExecutionInput{
 		TaskID:     req.TaskID,
 		WorkflowID: req.WorkflowID,
@@ -283,7 +386,7 @@ func (sw *SimpleWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskRe
 		logger.Error("RecordExecutionCompletedActivity failed", "error", err)
 	}
 
-	// 16. Emit TASK_COMPLETED
+	// 18. Emit TASK_COMPLETED
 	workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 		TaskID: req.TaskID,
 		Event:  events.NewTaskCompletedEvent(req.TaskID, req.WorkflowID),

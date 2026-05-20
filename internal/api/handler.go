@@ -97,6 +97,7 @@ func (h *Handler) createTask(w http.ResponseWriter, r *http.Request) {
 		MaxCompletionTokens: maxCompletionTokens,
 		WorkflowID:          workflowID,
 		RunID:               "",
+		Config:              req.Config,
 	}
 
 	if h.temporal == nil {

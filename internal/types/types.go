@@ -2,6 +2,7 @@ package types
 
 import (
 	"database/sql"
+	"strings"
 	"time"
 )
 
@@ -20,6 +21,7 @@ const (
 	ErrorTypeRedis          = "redis_error"
 	ErrorTypeWorkflowStart  = "workflow_start_error"
 	ErrorTypeWorkflow       = "workflow_error"
+	ErrorTypeTool           = "tool_error"
 	ErrorTypeUnknown        = "unknown_error"
 )
 
@@ -141,6 +143,7 @@ type WorkflowTaskRequest struct {
 	MaxCompletionTokens int
 	WorkflowID          string
 	RunID               string
+	Config              *TaskConfig
 }
 
 type WorkflowTaskResult struct {
@@ -186,4 +189,98 @@ type LLMResponse struct {
 	ProviderResponseID *string `json:"provider_response_id,omitempty"`
 	LatencyMS          int64   `json:"latency_ms"`
 	Error              *string `json:"error,omitempty"`
+}
+
+// Tool types
+
+type ToolCall struct {
+	ToolName   string                 `json:"tool_name"`
+	Arguments  map[string]interface{} `json:"arguments"`
+}
+
+type ToolResult struct {
+	ToolName  string `json:"tool_name"`
+	Output    string `json:"output"`
+	Error     string `json:"error,omitempty"`
+	LatencyMs int    `json:"latency_ms"`
+}
+
+type ToolInput struct {
+	TaskID    string                 `json:"task_id"`
+	ToolName  string                 `json:"tool_name"`
+	Arguments map[string]interface{} `json:"arguments"`
+}
+
+type ToolDecision struct {
+	Matched   bool   `json:"matched"`
+	ToolName  string `json:"tool_name,omitempty"`
+	Arguments map[string]interface{} `json:"arguments,omitempty"`
+}
+
+// DetectToolIntent applies deterministic rules to determine if query matches a known tool pattern.
+// Returns matched=false if no tool pattern matches.
+func DetectToolIntent(query string) ToolDecision {
+	// Calculator patterns: "calculate:" or "计算:" or "calc " prefix
+	lowerQuery := query
+	if len(lowerQuery) > 256 {
+		lowerQuery = lowerQuery[:256]
+	}
+
+	// Check for calculator patterns
+	if strings.HasPrefix(lowerQuery, "calculate:") {
+		expr := strings.TrimSpace(query[len("calculate:"):])
+		if expr != "" {
+			return ToolDecision{
+				Matched:   true,
+				ToolName:  "calculator",
+				Arguments: map[string]interface{}{"expr": expr},
+			}
+		}
+	}
+	if strings.Contains(lowerQuery, "计算:") {
+		idx := strings.Index(lowerQuery, "计算:")
+		expr := strings.TrimSpace(query[idx+len("计算:"):])
+		if expr != "" {
+			return ToolDecision{
+				Matched:   true,
+				ToolName:  "calculator",
+				Arguments: map[string]interface{}{"expr": expr},
+			}
+		}
+	}
+	if strings.HasPrefix(lowerQuery, "calc ") {
+		expr := strings.TrimSpace(query[len("calc "):])
+		if expr != "" {
+			return ToolDecision{
+				Matched:   true,
+				ToolName:  "calculator",
+				Arguments: map[string]interface{}{"expr": expr},
+			}
+		}
+	}
+
+	// Echo patterns: "echo:" or "回显:" prefix
+	if strings.HasPrefix(lowerQuery, "echo:") {
+		msg := strings.TrimSpace(query[len("echo:"):])
+		if msg != "" {
+			return ToolDecision{
+				Matched:   true,
+				ToolName:  "echo",
+				Arguments: map[string]interface{}{"message": msg},
+			}
+		}
+	}
+	if strings.Contains(lowerQuery, "回显:") {
+		idx := strings.Index(lowerQuery, "回显:")
+		msg := strings.TrimSpace(query[idx+len("回显:"):])
+		if msg != "" {
+			return ToolDecision{
+				Matched:   true,
+				ToolName:  "echo",
+				Arguments: map[string]interface{}{"message": msg},
+			}
+		}
+	}
+
+	return ToolDecision{Matched: false}
 }
