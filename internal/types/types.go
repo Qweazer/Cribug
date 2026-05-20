@@ -153,7 +153,10 @@ type WorkflowTaskRequest struct {
 
 	// ReAct Config
 	EnableReAct        bool `json:"enable_react,omitempty"`
-	ReActMaxIterations int `json:"react_max_iterations,omitempty"`
+	ReActMaxIterations int  `json:"react_max_iterations,omitempty"`
+
+	// ReactConfig is computed from EnableReAct + ReActMaxIterations
+	ReactConfig *ReactLoopConfig `json:"-"`
 }
 
 type WorkflowTaskResult struct {

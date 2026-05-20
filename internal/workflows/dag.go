@@ -1,6 +1,7 @@
 package workflows
 
 import (
+	"fmt"
 	"cribug/internal/activities"
 	"cribug/internal/events"
 	"cribug/internal/types"
@@ -129,12 +130,23 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 		Event:  events.NewTaskClassifiedEvent(req.TaskID, classification.Category, classification.Complexity, classification.RequiresTools),
 	}).Get(ctx, nil)
 
-	// 9. PlanDAGActivity
+	// Build ReactConfig from request flags
+	var reactConfig *types.ReactLoopConfig
+	if req.EnableReAct {
+		reactConfig = &types.ReactLoopConfig{
+			EnableReAct:       true,
+			MaxIterations:    req.ReActMaxIterations,
+			EarlyStopOnAnswer: true,
+		}
+	}
+
+	// 9. PlanDAGActivity (pass ReactConfig if enabled)
 	var planOutput *activities.PlanDAGOutput
 	err = workflow.ExecuteActivity(ctx, "PlanDAGActivity", activities.PlanDAGInput{
 		TaskID:         req.TaskID,
 		Query:          req.Query,
 		Classification: classification,
+		ReactConfig:    reactConfig,
 	}).Get(ctx, &planOutput)
 	if err != nil {
 		logger.Error("PlanDAGActivity failed", "error", err)
@@ -202,27 +214,64 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 				Event:  events.NewDAGNodeStartedEvent(req.TaskID, node.ID, node.Type),
 			}).Get(ctx, nil)
 
-			// Start node execution
-			layerFutures[node.ID] = workflow.ExecuteActivity(ctx, "ExecuteDAGNodeActivity", activities.ExecuteDAGNodeInput{
-				TaskID:          req.TaskID,
-				WorkflowID:      req.WorkflowID,
-				RunID:           req.RunID,
-				Query:           req.Query,
-				Node:            node,
-				UpstreamResults: upstreamResults,
-				Model:           req.Model,
-				Temperature:     req.Temperature,
-				MaxTokens:       req.MaxCompletionTokens,
-			})
+			// Build prompt from upstream results for LLM nodes
+			upstreamContext := ""
+			for depID, result := range upstreamResults {
+				upstreamContext += fmt.Sprintf("[%s] %s\n", depID, result.Output)
+			}
+			if upstreamContext == "" {
+				upstreamContext = "No upstream analysis available."
+			}
+
+			// Build full prompt for this node
+			prompt := fmt.Sprintf(`You are working on a DAG task.
+
+Original query: %s
+
+Upstream node results:
+%s
+
+Task: Complete the "%s" node (type: %s) by providing your output.
+
+Output your answer directly:`, req.Query, upstreamContext, node.Name, node.Type)
+
+			// Start node execution - use ReAct if enabled, otherwise use regular DAG node
+			if node.UseLLM && node.ReactConfig != nil && node.ReactConfig.EnableReAct {
+				// ReAct node: call ExecuteReActNodeActivity
+				layerFutures[node.ID] = workflow.ExecuteActivity(ctx, "ExecuteReActNodeActivity", activities.ExecuteReActNodeInput{
+					TaskID:      req.TaskID,
+					NodeID:      node.ID,
+					Prompt:      prompt,
+					Model:       req.Model,
+					Temperature: req.Temperature,
+					MaxTokens:   req.MaxCompletionTokens,
+					ReactConfig: *node.ReactConfig,
+					TTLSeconds:  86400,
+				})
+			} else {
+				// Regular node: call ExecuteDAGNodeActivity
+				layerFutures[node.ID] = workflow.ExecuteActivity(ctx, "ExecuteDAGNodeActivity", activities.ExecuteDAGNodeInput{
+					TaskID:          req.TaskID,
+					WorkflowID:      req.WorkflowID,
+					RunID:           req.RunID,
+					Query:           req.Query,
+					Node:            node,
+					UpstreamResults: upstreamResults,
+					Model:           req.Model,
+					Temperature:     req.Temperature,
+					MaxTokens:       req.MaxCompletionTokens,
+				})
+			}
 		}
 
 		// Wait for all nodes in this layer to complete
 		for nodeID, future := range layerFutures {
-			var nodeOutput *activities.ExecuteDAGNodeOutput
-			err := future.Get(ctx, &nodeOutput)
+			// Try to get as DAG node result first
+			var dagOutput *activities.ExecuteDAGNodeOutput
+			err := future.Get(ctx, &dagOutput)
 
 			if err != nil {
-				logger.Error("ExecuteDAGNodeActivity failed", "node_id", nodeID, "error", err)
+				logger.Error("Node execution failed", "node_id", nodeID, "error", err)
 				nodeResults[nodeID] = types.DAGNodeResult{
 					TaskID:   req.TaskID,
 					NodeID:   nodeID,
@@ -231,17 +280,17 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 					Error:    err.Error(),
 				}
 			} else {
-				nodeResults[nodeID] = *nodeOutput.Result
+				nodeResults[nodeID] = *dagOutput.Result
 
 				// If LLM node, record usage and emit LLM_COMPLETED
-				if nodeOutput.Result.NodeType == "llm" && nodeOutput.Usage != nil {
+				if dagOutput.Result.NodeType == "llm" && dagOutput.Usage != nil {
 					llmNodes++
-					totalTokens += nodeOutput.Usage.TotalTokens
-					totalPromptTokens += nodeOutput.Usage.PromptTokens
-					totalCompletionTokens += nodeOutput.Usage.CompletionTokens
+					totalTokens += dagOutput.Usage.TotalTokens
+					totalPromptTokens += dagOutput.Usage.PromptTokens
+					totalCompletionTokens += dagOutput.Usage.CompletionTokens
 
 					finishReason := "stop"
-					if nodeOutput.Result.Error != "" {
+					if dagOutput.Result.Error != "" {
 						finishReason = "error"
 					}
 
@@ -253,9 +302,9 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 						NodeID:           nodeID,
 						Model:            req.Model,
 						Provider:         "openai_compatible",
-						PromptTokens:     nodeOutput.Usage.PromptTokens,
-						CompletionTokens: nodeOutput.Usage.CompletionTokens,
-						TotalTokens:      nodeOutput.Usage.TotalTokens,
+						PromptTokens:     dagOutput.Usage.PromptTokens,
+						CompletionTokens: dagOutput.Usage.CompletionTokens,
+						TotalTokens:      dagOutput.Usage.TotalTokens,
 						LatencyMS:        0, // not tracked per-node
 						FinishReason:     finishReason,
 					}).Get(ctx, nil)

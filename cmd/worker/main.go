@@ -44,10 +44,11 @@ func main() {
 	emitEventActivity := activities.NewEmitEventActivity(redisClient)
 	agentActivities := activities.NewAgentActivities(cfg.LLMServiceURL)
 	sessionActivities := activities.NewSessionActivities(redisClient)
-	budgetActivities := activities.NewBudgetActivities()
+	budgetActivities := activities.NewBudgetActivities(cfg.LLMServiceURL)
 	usageActivities := activities.NewUsageActivities(dbClient.Stdlib())
 	dagActivities := activities.NewDAGActivities(dbClient.Stdlib(), cfg.LLMServiceURL, cfg.RedisAddr, cfg.RedisPass, cfg.RedisDB, cfg.DAGTTLSeconds)
 	multiAgentActivities := activities.NewMultiAgentActivities(cfg.LLMServiceURL)
+	reactActivities := activities.NewReActActivities(cfg.LLMServiceURL, cfg.RedisAddr, cfg.RedisPass, cfg.RedisDB)
 
 	w := worker.New(temporalClient, cfg.TemporalTaskQueue, worker.Options{})
 
@@ -81,6 +82,9 @@ func main() {
 	w.RegisterActivityWithOptions(multiAgentActivities.RunResearcherAgent, activity.RegisterOptions{Name: "RunResearcherAgentActivity"})
 	w.RegisterActivityWithOptions(multiAgentActivities.RunCriticAgent, activity.RegisterOptions{Name: "RunCriticAgentActivity"})
 	w.RegisterActivityWithOptions(multiAgentActivities.RunSynthesizerAgent, activity.RegisterOptions{Name: "RunSynthesizerAgentActivity"})
+
+	// Phase 3D: ReAct Activity
+	w.RegisterActivityWithOptions(reactActivities.ExecuteReActNode, activity.RegisterOptions{Name: "ExecuteReActNodeActivity"})
 
 	// Phase 3C: Tool Activities
 	toolActivities := activities.NewToolActivities()

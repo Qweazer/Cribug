@@ -61,6 +61,7 @@ func (h *Handler) createTask(w http.ResponseWriter, r *http.Request) {
 	workflowID := "task-" + taskID
 
 	maxTotalTokens, maxCompletionTokens, model, temperature := types.NormalizeConfig(req.Config)
+	maxParallelAgents, enableReAct, reactMaxIterations := h.extractConcurrencyConfig(req.Config)
 
 	task := &types.Task{
 		ID:                 taskID,
@@ -98,6 +99,9 @@ func (h *Handler) createTask(w http.ResponseWriter, r *http.Request) {
 		WorkflowID:          workflowID,
 		RunID:               "",
 		Config:              req.Config,
+		MaxParallelAgents:   maxParallelAgents,
+		EnableReAct:         enableReAct,
+		ReActMaxIterations:  reactMaxIterations,
 	}
 
 	if h.temporal == nil {
@@ -192,6 +196,35 @@ func (h *Handler) validateTaskMode(cfg *types.TaskConfig) (string, error) {
 	}
 
 	return mode, nil
+}
+
+// extractConcurrencyConfig extracts DAG concurrency and ReAct config from TaskConfig
+func (h *Handler) extractConcurrencyConfig(cfg *types.TaskConfig) (maxParallelAgents int, enableReAct bool, reactMaxIterations int) {
+	maxParallelAgents = 1 // default: sequential
+	enableReAct = false
+	reactMaxIterations = 3
+
+	if cfg == nil {
+		return
+	}
+
+	if cfg.MaxParallelAgents != nil {
+		maxParallelAgents = *cfg.MaxParallelAgents
+	}
+	if cfg.EnableReAct != nil {
+		enableReAct = *cfg.EnableReAct
+	}
+	if cfg.ReActMaxIterations != nil {
+		reactMaxIterations = *cfg.ReActMaxIterations
+		if reactMaxIterations <= 0 {
+			reactMaxIterations = 3
+		}
+		if reactMaxIterations > 10 {
+			reactMaxIterations = 10
+		}
+	}
+
+	return
 }
 
 func (h *Handler) getTask(w http.ResponseWriter, r *http.Request) {

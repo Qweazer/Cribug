@@ -95,6 +95,7 @@ type PlanDAGInput struct {
 	TaskID         string
 	Query          string
 	Classification *types.TaskClassification
+	ReactConfig    *types.ReactLoopConfig // nil means no ReAct, pointer enables conditional
 }
 
 type PlanDAGOutput struct {
@@ -124,6 +125,7 @@ func (a *DAGActivities) PlanDAG(ctx context.Context, input PlanDAGInput) (*PlanD
 				Input:     "Synthesize analysis into answer",
 				DependsOn: []string{"analyze_input"},
 				UseLLM:    true, // LLM-backed node
+				ReactConfig: input.ReactConfig,
 			},
 		},
 		Edges: []types.DAGEdge{

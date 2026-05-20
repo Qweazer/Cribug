@@ -1,6 +1,25 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from functools import lru_cache
+import tiktoken
 import time
+
+# tiktoken encoding mappings
+MODEL_TO_ENCODING = {
+    "gpt-4o": "o200k_base",
+    "gpt-4o-mini": "o200k_base",
+    "gpt-4o-2024-05-13": "o200k_base",
+    "gpt-4": "cl100k_base",
+    "gpt-4-0314": "cl100k_base",
+    "gpt-3.5-turbo": "cl100k_base",
+    "gpt-3.5-turbo-0301": "cl100k_base",
+}
+
+@lru_cache(maxsize=256)
+def get_encoding(model: str):
+    """Get tiktoken encoding for a model (cached)."""
+    encoding_name = MODEL_TO_ENCODING.get(model, "cl100k_base")
+    return tiktoken.get_encoding(encoding_name)
 
 app = FastAPI()
 
@@ -59,9 +78,46 @@ class LLMResponse(BaseModel):
     error: str | None = None
 
 
+class TokenizeRequest(BaseModel):
+    text: str
+    model: str = "gpt-4o-mini"
+
+
 @app.get("/health")
 def health():
     return {"status": "healthy"}
+
+
+@app.post("/tokenize")
+def tokenize(req: TokenizeRequest):
+    """Count tokens using tiktoken."""
+    try:
+        encoding = get_encoding(req.model)
+        tokens = encoding.encode(req.text)
+        return {
+            "token_count": len(tokens),
+            "encoding": encoding.name,
+            "model": req.model
+        }
+    except Exception as e:
+        # Fallback for unknown models
+        try:
+            encoding = tiktoken.get_encoding("cl100k_base")
+            tokens = encoding.encode(req.text)
+            return {
+                "token_count": len(tokens),
+                "encoding": encoding.name,
+                "model": req.model,
+                "fallback": True
+            }
+        except Exception:
+            # Ultimate fallback: rough estimate
+            return {
+                "token_count": max(1, len(req.text) // 4),
+                "encoding": "fallback",
+                "model": req.model,
+                "fallback": True
+            }
 
 
 @app.post("/chat")

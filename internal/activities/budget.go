@@ -1,16 +1,36 @@
 package activities
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"math"
+	"net/http"
+	"time"
+
+	gocache "github.com/patrickmn/go-cache"
 
 	"go.temporal.io/sdk/activity"
 )
 
-type BudgetActivities struct{}
+// Global token cache with 10 minute TTL
+var tokenCache = gocache.New(10*time.Minute, 5*time.Minute)
 
-func NewBudgetActivities() *BudgetActivities {
-	return &BudgetActivities{}
+type BudgetActivities struct {
+	llmServiceURL string
+	httpClient    *http.Client
+}
+
+func NewBudgetActivities(llmServiceURL string) *BudgetActivities {
+	return &BudgetActivities{
+		llmServiceURL: llmServiceURL,
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second,
+		},
+	}
 }
 
 type EstimatePromptTokensInput struct {
@@ -20,20 +40,87 @@ type EstimatePromptTokensInput struct {
 
 type EstimatePromptTokensOutput struct {
 	EstimatedPromptTokens int
+	Cached               bool
+}
+
+// hash256 creates a SHA256 hash of text+model for cache key
+func hash256(text, model string) string {
+	h := sha256.New()
+	h.Write([]byte(text + model))
+	return hex.EncodeToString(h.Sum(nil))[:16] // Use first 16 chars for shorter key
 }
 
 func (a *BudgetActivities) EstimatePromptTokens(ctx context.Context, input EstimatePromptTokensInput) (*EstimatePromptTokensOutput, error) {
 	logger := activity.GetLogger(ctx)
 	logger.Info("EstimatePromptTokensActivity started", "text_len", len(input.Text), "model", input.Model)
 
-	// MVP: ceil(len(text)/4.0)
-	estimated := int(math.Ceil(float64(len(input.Text)) / 4.0))
-	if estimated < 1 {
-		estimated = 1
+	// 1. Check cache first
+	cacheKey := hash256(input.Text, input.Model)
+	if cached, found := tokenCache.Get(cacheKey); found {
+		logger.Info("EstimatePromptTokensActivity: cache hit", "key", cacheKey)
+		return &EstimatePromptTokensOutput{
+			EstimatedPromptTokens: cached.(int),
+			Cached:               true,
+		}, nil
 	}
 
-	logger.Info("EstimatePromptTokensActivity completed", "estimated", estimated)
-	return &EstimatePromptTokensOutput{EstimatedPromptTokens: estimated}, nil
+	// 2. Call /tokenize endpoint
+	estimated, err := a.callTokenize(ctx, input.Text, input.Model)
+	if err != nil {
+		logger.Warn("EstimatePromptTokensActivity: tokenize failed, using fallback", "error", err)
+		// Fallback to rough estimate
+		estimated = int(math.Ceil(float64(len(input.Text)) / 4.0))
+		if estimated < 1 {
+			estimated = 1
+		}
+	}
+
+	// 3. Store in cache
+	tokenCache.Set(cacheKey, estimated, gocache.DefaultExpiration)
+
+	logger.Info("EstimatePromptTokensActivity completed", "estimated", estimated, "cached", false)
+	return &EstimatePromptTokensOutput{
+		EstimatedPromptTokens: estimated,
+		Cached:               false,
+	}, nil
+}
+
+// callTokenize calls the Python /tokenize endpoint
+func (a *BudgetActivities) callTokenize(ctx context.Context, text, model string) (int, error) {
+	reqBody := map[string]string{
+		"text":  text,
+		"model": model,
+	}
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return 0, fmt.Errorf("marshal request: %w", err)
+	}
+
+	resp, err := a.httpClient.Post(
+		a.llmServiceURL+"/tokenize",
+		"application/json",
+		bytes.NewBuffer(jsonBody),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("http call: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return 0, fmt.Errorf("tokenize returned status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		TokenCount int  `json:"token_count"`
+		Encoding  string `json:"encoding,omitempty"`
+		Model     string `json:"model,omitempty"`
+		Fallback  bool   `json:"fallback,omitempty"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, fmt.Errorf("decode response: %w", err)
+	}
+
+	return result.TokenCount, nil
 }
 
 type CheckBudgetInput struct {
@@ -88,7 +175,6 @@ func (a *BudgetActivities) CheckBudget(ctx context.Context, input CheckBudgetInp
 }
 
 // CheckSynthesizerBudget checks budget for synthesizer LLM call
-// Returns budget info but does NOT block execution - caller decides based on result
 func (a *BudgetActivities) CheckSynthesizerBudget(ctx context.Context, input CheckBudgetInput) (*CheckBudgetOutput, error) {
 	return a.CheckBudget(ctx, input)
 }
