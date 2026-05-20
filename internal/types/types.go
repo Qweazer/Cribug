@@ -32,6 +32,9 @@ type TaskConfig struct {
 	Temperature         *float64 `json:"temperature"`
 	Mode                *string  `json:"mode,omitempty"`
 	EnableTools         *bool    `json:"enable_tools,omitempty"`
+	MaxParallelAgents   *int     `json:"max_parallel_agents,omitempty"`
+	EnableReAct         *bool    `json:"enable_react,omitempty"`
+	ReActMaxIterations  *int     `json:"react_max_iterations,omitempty"`
 }
 
 const (
@@ -144,6 +147,13 @@ type WorkflowTaskRequest struct {
 	WorkflowID          string
 	RunID               string
 	Config              *TaskConfig
+
+	// DAG Concurrency Config
+	MaxParallelAgents int `json:"max_parallel_agents,omitempty"`
+
+	// ReAct Config
+	EnableReAct        bool `json:"enable_react,omitempty"`
+	ReActMaxIterations int `json:"react_max_iterations,omitempty"`
 }
 
 type WorkflowTaskResult struct {

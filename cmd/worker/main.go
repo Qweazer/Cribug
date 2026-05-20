@@ -46,7 +46,7 @@ func main() {
 	sessionActivities := activities.NewSessionActivities(redisClient)
 	budgetActivities := activities.NewBudgetActivities()
 	usageActivities := activities.NewUsageActivities(dbClient.Stdlib())
-	dagActivities := activities.NewDAGActivities(dbClient.Stdlib(), cfg.LLMServiceURL)
+	dagActivities := activities.NewDAGActivities(dbClient.Stdlib(), cfg.LLMServiceURL, cfg.RedisAddr, cfg.RedisPass, cfg.RedisDB, cfg.DAGTTLSeconds)
 	multiAgentActivities := activities.NewMultiAgentActivities(cfg.LLMServiceURL)
 
 	w := worker.New(temporalClient, cfg.TemporalTaskQueue, worker.Options{})

@@ -148,115 +148,144 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 		Event:  events.NewDAGPlannedEvent(req.TaskID, len(plan.Nodes), len(plan.Edges)),
 	}).Get(ctx, nil)
 
-	// 11. Execute DAG nodes in order
+	// 11. Execute DAG nodes with concurrent execution per layer
 	nodeResults := make(map[string]types.DAGNodeResult)
 	llmNodes := 0
 	totalTokens := 0
 	var totalPromptTokens, totalCompletionTokens int
 
-	for _, node := range plan.Nodes {
-		logger.Info("Executing DAG node", "node_id", node.ID, "use_llm", node.UseLLM)
+	// ========== 阶段 2：并发执行阶段 ===========
+	// 并发度由 req.MaxParallelAgents 控制，每层节点会并发执行
 
-		// Emit DAG_NODE_STARTED
-		workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
-			TaskID: req.TaskID,
-			Event:  events.NewDAGNodeStartedEvent(req.TaskID, node.ID, node.Type),
-		}).Get(ctx, nil)
+	// Determine concurrency level from request (for logging)
+	maxParallel := 1
+	if req.MaxParallelAgents > 0 {
+		maxParallel = req.MaxParallelAgents
+	}
 
-		// Build upstream results map
-		upstreamResults := make(map[string]types.DAGNodeResult)
-		for _, depID := range node.DependsOn {
-			if result, ok := nodeResults[depID]; ok {
-				upstreamResults[depID] = result
+	logger.Info("Starting concurrent node execution", "max_parallel", maxParallel)
+
+	// ========== 按拓扑顺序启动可并发的节点 ===========
+	// 1. Group nodes by "layer" (nodes with same dependencies can run concurrently)
+	nodeLayers := groupNodesByLayer(plan.Nodes)
+	logger.Info("Nodes grouped into layers", "num_layers", len(nodeLayers))
+
+	// 2. Execute each layer concurrently
+	for _, layer := range nodeLayers {
+		layerFutures := make(map[string]workflow.Future)
+
+		logger.Info("Executing DAG node layer", "layer_size", len(layer))
+
+		// Start all nodes in this layer concurrently
+		for _, node := range layer {
+			logger.Info("Executing DAG node", "node_id", node.ID, "use_llm", node.UseLLM)
+
+			// Build upstream results
+			upstreamResults := make(map[string]types.DAGNodeResult)
+			for _, depID := range node.DependsOn {
+				if result, ok := nodeResults[depID]; ok {
+					upstreamResults[depID] = result
+				}
 			}
-		}
 
-		// If LLM node, emit LLM_STARTED
-		if node.UseLLM {
+			// If LLM node, emit LLM_STARTED
+			if node.UseLLM {
+				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+					TaskID: req.TaskID,
+					Event:  events.NewLLMStartedEvent(req.TaskID, req.Model),
+				}).Get(ctx, nil)
+			}
+
+			// Emit DAG_NODE_STARTED
 			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 				TaskID: req.TaskID,
-				Event:  events.NewLLMStartedEvent(req.TaskID, req.Model),
+				Event:  events.NewDAGNodeStartedEvent(req.TaskID, node.ID, node.Type),
+			}).Get(ctx, nil)
+
+			// Start node execution
+			layerFutures[node.ID] = workflow.ExecuteActivity(ctx, "ExecuteDAGNodeActivity", activities.ExecuteDAGNodeInput{
+				TaskID:          req.TaskID,
+				WorkflowID:      req.WorkflowID,
+				RunID:           req.RunID,
+				Query:           req.Query,
+				Node:            node,
+				UpstreamResults: upstreamResults,
+				Model:           req.Model,
+				Temperature:     req.Temperature,
+				MaxTokens:       req.MaxCompletionTokens,
+			})
+		}
+
+		// Wait for all nodes in this layer to complete
+		for nodeID, future := range layerFutures {
+			var nodeOutput *activities.ExecuteDAGNodeOutput
+			err := future.Get(ctx, &nodeOutput)
+
+			if err != nil {
+				logger.Error("ExecuteDAGNodeActivity failed", "node_id", nodeID, "error", err)
+				nodeResults[nodeID] = types.DAGNodeResult{
+					TaskID:   req.TaskID,
+					NodeID:   nodeID,
+					NodeType: "", // Will be populated from plan lookup
+					Status:   "failed",
+					Error:    err.Error(),
+				}
+			} else {
+				nodeResults[nodeID] = *nodeOutput.Result
+
+				// If LLM node, record usage and emit LLM_COMPLETED
+				if nodeOutput.Result.NodeType == "llm" && nodeOutput.Usage != nil {
+					llmNodes++
+					totalTokens += nodeOutput.Usage.TotalTokens
+					totalPromptTokens += nodeOutput.Usage.PromptTokens
+					totalCompletionTokens += nodeOutput.Usage.CompletionTokens
+
+					finishReason := "stop"
+					if nodeOutput.Result.Error != "" {
+						finishReason = "error"
+					}
+
+					// Record LLM usage for node
+					workflow.ExecuteActivity(ctx, "RecordDAGNodeUsageActivity", activities.RecordDAGNodeUsageInput{
+						TaskID:           req.TaskID,
+						WorkflowID:       req.WorkflowID,
+						RunID:            req.RunID,
+						NodeID:           nodeID,
+						Model:            req.Model,
+						Provider:         "openai_compatible",
+						PromptTokens:     nodeOutput.Usage.PromptTokens,
+						CompletionTokens: nodeOutput.Usage.CompletionTokens,
+						TotalTokens:      nodeOutput.Usage.TotalTokens,
+						LatencyMS:        0, // not tracked per-node
+						FinishReason:     finishReason,
+					}).Get(ctx, nil)
+
+					// Emit LLM_COMPLETED
+					workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+						TaskID: req.TaskID,
+						Event:  events.NewLLMCompletedEvent(req.TaskID, req.Model, finishReason, 0),
+					}).Get(ctx, nil)
+
+					// Emit USAGE_RECORDED
+					workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+						TaskID: req.TaskID,
+						Event:  events.NewUsageRecordedEvent(req.TaskID, totalTokens),
+					}).Get(ctx, nil)
+				}
+			}
+
+			// Emit DAG_NODE_COMPLETED
+			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+				TaskID: req.TaskID,
+				Event:  events.NewDAGNodeCompletedEvent(
+					req.TaskID,
+					nodeID,
+					nodeResults[nodeID].NodeType,
+					nodeResults[nodeID].Status,
+					nodeResults[nodeID].Output,
+				),
 			}).Get(ctx, nil)
 		}
-
-		// Execute the node
-		var nodeOutput *activities.ExecuteDAGNodeOutput
-		err = workflow.ExecuteActivity(ctx, "ExecuteDAGNodeActivity", activities.ExecuteDAGNodeInput{
-			TaskID:          req.TaskID,
-			WorkflowID:       req.WorkflowID,
-			RunID:           req.RunID,
-			Query:           req.Query,
-			Node:            node,
-			UpstreamResults: upstreamResults,
-			Model:           req.Model,
-			Temperature:     req.Temperature,
-			MaxTokens:       req.MaxCompletionTokens,
-		}).Get(ctx, &nodeOutput)
-
-		if err != nil {
-			logger.Error("ExecuteDAGNodeActivity failed", "node_id", node.ID, "error", err)
-			nodeResults[node.ID] = types.DAGNodeResult{
-				TaskID:   req.TaskID,
-				NodeID:   node.ID,
-				NodeType: node.Type,
-				Status:   "failed",
-				Error:    err.Error(),
-			}
-		} else {
-			nodeResults[node.ID] = *nodeOutput.Result
-
-			// If LLM node, record usage and emit LLM_COMPLETED
-			if node.UseLLM && nodeOutput.Usage != nil {
-				llmNodes++
-				totalTokens += nodeOutput.Usage.TotalTokens
-				totalPromptTokens += nodeOutput.Usage.PromptTokens
-				totalCompletionTokens += nodeOutput.Usage.CompletionTokens
-
-				finishReason := "stop"
-				if nodeOutput.Result.Error != "" {
-					finishReason = "error"
-				}
-
-				// Record LLM usage for node
-				workflow.ExecuteActivity(ctx, "RecordDAGNodeUsageActivity", activities.RecordDAGNodeUsageInput{
-					TaskID:           req.TaskID,
-					WorkflowID:       req.WorkflowID,
-					RunID:            req.RunID,
-					NodeID:           node.ID,
-					Model:            req.Model,
-					Provider:         "openai_compatible",
-					PromptTokens:     nodeOutput.Usage.PromptTokens,
-					CompletionTokens: nodeOutput.Usage.CompletionTokens,
-					TotalTokens:      nodeOutput.Usage.TotalTokens,
-					LatencyMS:        0, // not tracked per-node
-					FinishReason:     finishReason,
-				}).Get(ctx, nil)
-
-				// Emit LLM_COMPLETED
-				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
-					TaskID: req.TaskID,
-					Event:  events.NewLLMCompletedEvent(req.TaskID, req.Model, finishReason, 0),
-				}).Get(ctx, nil)
-
-				// Emit USAGE_RECORDED
-				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
-					TaskID: req.TaskID,
-					Event:  events.NewUsageRecordedEvent(req.TaskID, totalTokens),
-				}).Get(ctx, nil)
-			}
-		}
-
-		// Emit DAG_NODE_COMPLETED
-		workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
-			TaskID: req.TaskID,
-			Event:  events.NewDAGNodeCompletedEvent(
-				req.TaskID,
-				node.ID,
-				node.Type,
-				nodeResults[node.ID].Status,
-				nodeResults[node.ID].Output,
-			),
-		}).Get(ctx, nil)
 	}
 
 	// 12. SynthesisActivity
@@ -361,4 +390,58 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 		Status: types.TaskStatusCompleted,
 		Answer: synthesisOutput.Result.FinalAnswer,
 	}, nil
+}
+
+// groupNodesByLayer groups nodes so that nodes in the same layer can run concurrently
+// Nodes are in the same layer if they have no dependencies on each other
+func groupNodesByLayer(nodes []types.DAGNode) [][]types.DAGNode {
+	// Create dependency sets
+	deps := make(map[string]map[string]bool)
+	for _, node := range nodes {
+		deps[node.ID] = make(map[string]bool)
+		for _, dep := range node.DependsOn {
+			deps[node.ID][dep] = true
+		}
+	}
+
+	var layers [][]types.DAGNode
+	remaining := make(map[string]types.DAGNode)
+	for _, node := range nodes {
+		remaining[node.ID] = node
+	}
+
+	for len(remaining) > 0 {
+		var currentLayer []types.DAGNode
+		var toRemove []string
+
+		for id, node := range remaining {
+			// Check if all dependencies are satisfied (not in remaining)
+			allSatisfied := true
+			for _, dep := range node.DependsOn {
+				if _, ok := remaining[dep]; ok {
+					allSatisfied = false
+					break
+				}
+			}
+			if allSatisfied {
+				currentLayer = append(currentLayer, node)
+				toRemove = append(toRemove, id)
+			}
+		}
+
+		if len(currentLayer) == 0 {
+			// Circular dependency detected, fall back to single layer
+			for id, node := range remaining {
+				currentLayer = append(currentLayer, node)
+				toRemove = append(toRemove, id)
+			}
+		}
+
+		for _, id := range toRemove {
+			delete(remaining, id)
+		}
+		layers = append(layers, currentLayer)
+	}
+
+	return layers
 }

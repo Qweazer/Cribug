@@ -22,6 +22,9 @@ type DAGNode struct {
 	Input     string   `json:"input"`
 	DependsOn []string `json:"depends_on"`
 	UseLLM   bool     `json:"use_llm"`   // whether this node should call LLM
+
+	// ReAct support
+	ReactConfig *ReactLoopConfig `json:"react_config,omitempty"`
 }
 
 type DAGEdge struct {
@@ -47,4 +50,27 @@ type DAGSynthesisResult struct {
 	TotalPromptTokens   int    `json:"total_prompt_tokens"`
 	TotalCompletionTokens int  `json:"total_completion_tokens"`
 	TotalTokens        int    `json:"total_tokens"`
+}
+
+// ReactLoopConfig holds configuration for ReAct reasoning loop
+type ReactLoopConfig struct {
+	EnableReAct       bool `json:"enable_react"`
+	MaxIterations    int  `json:"max_iterations"`     // default 3, max 10
+	EarlyStopOnAnswer bool `json:"early_stop_on_answer"` // default true
+}
+
+// ReactStep represents a single step in ReAct reasoning
+type ReactStep struct {
+	Iteration   int    `json:"iteration"`
+	Thought     string `json:"thought"`
+	Action      string `json:"action"`
+	Observation string `json:"observation"`
+	Timestamp   string `json:"timestamp"`
+}
+
+// ReactResult holds the result of a ReAct reasoning loop
+type ReactResult struct {
+	Steps          []ReactStep `json:"steps"`
+	FinalAnswer    string       `json:"final_answer"`
+	IterationsUsed int         `json:"iterations_used"`
 }

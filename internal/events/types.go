@@ -27,6 +27,9 @@ const (
 	EventTypeToolStepStarted       = "TOOL_STEP_STARTED"
 	EventTypeToolStepCompleted     = "TOOL_STEP_COMPLETED"
 	EventTypeToolStepFailed        = "TOOL_STEP_FAILED"
+	// ReAct events
+	EventTypeReActStep             = "REACT_STEP"
+	EventTypeReActCompleted        = "REACT_COMPLETED"
 )
 
 type AgentEvent struct {
@@ -284,5 +287,27 @@ func NewToolStepFailedEvent(taskID, agentRole string, stepID int, toolName, erro
 		"error":      errorMsg,
 		"latency_ms": latencyMs,
 		"timestamp":  time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewReActStepEvent(taskID, nodeID string, iteration int, thought, action, observation string) AgentEvent {
+	return NewAgentEvent(EventTypeReActStep, map[string]interface{}{
+		"task_id":     taskID,
+		"node_id":     nodeID,
+		"iteration":   iteration,
+		"thought":     thought,
+		"action":      action,
+		"observation": observation,
+		"timestamp":   time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewReActCompletedEvent(taskID, nodeID string, iterations int, finalAnswer string) AgentEvent {
+	return NewAgentEvent(EventTypeReActCompleted, map[string]interface{}{
+		"task_id":       taskID,
+		"node_id":       nodeID,
+		"iterations":    iterations,
+		"final_answer":  finalAnswer,
+		"timestamp":     time.Now().UTC().Format(time.RFC3339),
 	})
 }

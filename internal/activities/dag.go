@@ -16,12 +16,14 @@ import (
 type DAGActivities struct {
 	db           *sql.DB
 	llmClient   *llm.Client
+	redisClient *DAGRedisClient
 }
 
-func NewDAGActivities(db *sql.DB, llmServiceURL string) *DAGActivities {
+func NewDAGActivities(db *sql.DB, llmServiceURL string, redisAddr, redisPass string, redisDB int, ttlSeconds int) *DAGActivities {
 	return &DAGActivities{
 		db:         db,
 		llmClient: llm.NewClient(llmServiceURL),
+		redisClient: NewDAGRedisClient(redisAddr, redisPass, redisDB, ttlSeconds),
 	}
 }
 
@@ -162,6 +164,13 @@ func (a *DAGActivities) ExecuteDAGNode(ctx context.Context, input ExecuteDAGNode
 		"node_type", input.Node.Type,
 		"use_llm", input.Node.UseLLM)
 
+	// Update Redis status to "running"
+	if a.redisClient != nil {
+		if err := a.redisClient.SetNodeStatus(ctx, input.TaskID, input.Node.ID, "running"); err != nil {
+			logger.Warn("Failed to set node status in Redis", "error", err)
+		}
+	}
+
 	// Debug hook: force node failure for testing
 	if strings.Contains(input.Query, "__force_dag_node_failure__") {
 		result := &types.DAGNodeResult{
@@ -172,6 +181,34 @@ func (a *DAGActivities) ExecuteDAGNode(ctx context.Context, input ExecuteDAGNode
 			Error:    "debug: forced node failure for testing",
 		}
 		logger.Warn("ExecuteDAGNodeActivity: debug forced failure", "task_id", input.TaskID, "node_id", input.Node.ID)
+
+		// 1. Update Redis with result
+		if a.redisClient != nil {
+			resultMap := map[string]interface{}{
+				"node_id":   result.NodeID,
+				"node_type": result.NodeType,
+				"status":    result.Status,
+				"output":    result.Output,
+			}
+			if result.Error != "" {
+				resultMap["error"] = result.Error
+			}
+			if err := a.redisClient.SetNodeResult(ctx, input.TaskID, input.Node.ID, resultMap); err != nil {
+				logger.Warn("Failed to set node result in Redis", "error", err)
+			}
+		}
+
+		// 2. Update Redis status to "completed" or "failed"
+		if a.redisClient != nil {
+			status := "completed"
+			if result.Error != "" {
+				status = "failed"
+			}
+			if err := a.redisClient.SetNodeStatus(ctx, input.TaskID, input.Node.ID, status); err != nil {
+				logger.Warn("Failed to update node status in Redis", "error", err)
+			}
+		}
+
 		return &ExecuteDAGNodeOutput{Result: result}, nil
 	}
 
@@ -197,6 +234,33 @@ func (a *DAGActivities) ExecuteDAGNode(ctx context.Context, input ExecuteDAGNode
 			"task_id", input.TaskID,
 			"node_id", input.Node.ID,
 			"status", result.Status)
+
+		// 1. Update Redis with result
+		if a.redisClient != nil {
+			resultMap := map[string]interface{}{
+				"node_id":   result.NodeID,
+				"node_type": result.NodeType,
+				"status":    result.Status,
+				"output":    result.Output,
+			}
+			if result.Error != "" {
+				resultMap["error"] = result.Error
+			}
+			if err := a.redisClient.SetNodeResult(ctx, input.TaskID, input.Node.ID, resultMap); err != nil {
+				logger.Warn("Failed to set node result in Redis", "error", err)
+			}
+		}
+
+		// 2. Update Redis status to "completed" or "failed"
+		if a.redisClient != nil {
+			status := "completed"
+			if result.Error != "" {
+				status = "failed"
+			}
+			if err := a.redisClient.SetNodeStatus(ctx, input.TaskID, input.Node.ID, status); err != nil {
+				logger.Warn("Failed to update node status in Redis", "error", err)
+			}
+		}
 
 		return &ExecuteDAGNodeOutput{Result: result}, nil
 	}
@@ -249,6 +313,34 @@ Output your answer directly:`, input.Query, upstreamContext, input.Node.Name, in
 			Status:   "failed",
 			Error:    err.Error(),
 		}
+
+		// 1. Update Redis with result
+		if a.redisClient != nil {
+			resultMap := map[string]interface{}{
+				"node_id":   result.NodeID,
+				"node_type": result.NodeType,
+				"status":    result.Status,
+				"output":    result.Output,
+			}
+			if result.Error != "" {
+				resultMap["error"] = result.Error
+			}
+			if err := a.redisClient.SetNodeResult(ctx, input.TaskID, input.Node.ID, resultMap); err != nil {
+				logger.Warn("Failed to set node result in Redis", "error", err)
+			}
+		}
+
+		// 2. Update Redis status to "completed" or "failed"
+		if a.redisClient != nil {
+			status := "completed"
+			if result.Error != "" {
+				status = "failed"
+			}
+			if err := a.redisClient.SetNodeStatus(ctx, input.TaskID, input.Node.ID, status); err != nil {
+				logger.Warn("Failed to update node status in Redis", "error", err)
+			}
+		}
+
 		return &ExecuteDAGNodeOutput{Result: result}, nil
 	}
 
@@ -265,6 +357,33 @@ Output your answer directly:`, input.Query, upstreamContext, input.Node.Name, in
 		"node_id", input.Node.ID,
 		"status", result.Status,
 		"tokens", resp.Usage.TotalTokens)
+
+	// 1. Update Redis with result
+	if a.redisClient != nil {
+		resultMap := map[string]interface{}{
+			"node_id":   result.NodeID,
+			"node_type": result.NodeType,
+			"status":    result.Status,
+			"output":    result.Output,
+		}
+		if result.Error != "" {
+			resultMap["error"] = result.Error
+		}
+		if err := a.redisClient.SetNodeResult(ctx, input.TaskID, input.Node.ID, resultMap); err != nil {
+			logger.Warn("Failed to set node result in Redis", "error", err)
+		}
+	}
+
+	// 2. Update Redis status to "completed" or "failed"
+	if a.redisClient != nil {
+		status := "completed"
+		if result.Error != "" {
+			status = "failed"
+		}
+		if err := a.redisClient.SetNodeStatus(ctx, input.TaskID, input.Node.ID, status); err != nil {
+			logger.Warn("Failed to update node status in Redis", "error", err)
+		}
+	}
 
 	return &ExecuteDAGNodeOutput{
 		Result: result,

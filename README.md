@@ -379,6 +379,14 @@ Gateway cannot reach Temporal:
 2. Check RecordUsageActivity executed
 3. Check Postgres has data: `docker.exe exec deploy-postgres-1 psql ...`
 
+## Phase 3: DAG Concurrency + ReAct + tiktoken
+
+| Slice | Status | Description |
+|-------|--------|-------------|
+| Slice 7 | ✅ | DAG Concurrency with LocalDispatchOptions + Redis state tracking |
+| Slice 8 | ✅ | ReAct Reasoning Loop with stepwise tool execution |
+| Slice 9 | Future | Real tiktoken Tokenizer |
+
 ## What We DON'T Do (Yet)
 
 This MVP does NOT currently include:

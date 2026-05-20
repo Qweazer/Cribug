@@ -18,6 +18,16 @@ type Config struct {
 	EnableDAGWorkflow bool
 	EnableMultiAgent  bool
 	EnableTools       bool
+
+	// DAG Concurrency (Slice 7)
+	EnableDAGConcurrency bool
+	DAGTTLSeconds        int
+	MaxParallelAgents    int
+
+	// ReAct Reasoning Loop (Slice 8)
+	EnableReAct          bool
+	ReActMaxIterations   int
+	ReActStepsTTLSeconds int
 }
 
 func Load() *Config {
@@ -33,6 +43,16 @@ func Load() *Config {
 		EnableDAGWorkflow: getEnvAsBool("ENABLE_DAG_WORKFLOW", false),
 		EnableMultiAgent:  getEnvAsBool("ENABLE_MULTI_AGENT", false),
 		EnableTools:       getEnvAsBool("ENABLE_TOOLS", false),
+
+		// DAG Concurrency (Slice 7)
+		EnableDAGConcurrency: getEnvAsBool("ENABLE_DAG_CONCURRENCY", false),
+		DAGTTLSeconds:        getEnvAsInt("DAG_TTL_SECONDS", 86400),
+		MaxParallelAgents:    getEnvAsInt("MAX_PARALLEL_AGENTS", 1),
+
+		// ReAct Reasoning Loop (Slice 8)
+		EnableReAct:          getEnvAsBool("ENABLE_REACT", false),
+		ReActMaxIterations:   getEnvAsInt("REACT_MAX_ITERATIONS", 3),
+		ReActStepsTTLSeconds: getEnvAsInt("REACT_STEPS_TTL_SECONDS", 86400),
 	}
 
 	if urlStr := os.Getenv("REDIS_URL"); urlStr != "" {
