@@ -100,22 +100,26 @@ func (a *DAGVisualActivities) RecordDAGNodeStatus(ctx context.Context, input Rec
 	}
 
 	// Increment status counters based on current status
-	if input.Status == types.NodeStatusPending {
-		metaFields["pending_nodes"] = incrementField(metaMap, "pending_nodes", 1)
-	} else if input.Status == types.NodeStatusRunning {
-		metaFields["pending_nodes"] = decrementField(metaMap, "pending_nodes", 1)
-		metaFields["running_nodes"] = incrementField(metaMap, "running_nodes", 1)
-	} else if input.Status == types.NodeStatusCompleted {
-		metaFields["running_nodes"] = decrementField(metaMap, "running_nodes", 1)
-		metaFields["completed_nodes"] = incrementField(metaMap, "completed_nodes", 1)
-	} else if input.Status == types.NodeStatusFailed {
-		metaFields["running_nodes"] = decrementField(metaMap, "running_nodes", 1)
-		metaFields["failed_nodes"] = incrementField(metaMap, "failed_nodes", 1)
-	}
+	pendingCount := a.intFromMap(metaMap, "pending_nodes")
+	runningCount := a.intFromMap(metaMap, "running_nodes")
+	completedCount := a.intFromMap(metaMap, "completed_nodes")
 
-	// Ensure total_nodes is set
-	if _, ok := metaMap["total_nodes"]; !ok {
-		metaFields["total_nodes"] = 0
+	if input.Status == types.NodeStatusPending {
+		metaFields["pending_nodes"] = pendingCount + 1
+	} else if input.Status == types.NodeStatusRunning {
+		metaFields["pending_nodes"] = pendingCount - 1
+		metaFields["running_nodes"] = runningCount + 1
+	} else if input.Status == types.NodeStatusCompleted {
+		metaFields["running_nodes"] = runningCount - 1
+		metaFields["completed_nodes"] = completedCount + 1
+		// Set total = total completed so far (including this one)
+		// At this point, completedCount is the value BEFORE this update
+		metaFields["total_nodes"] = completedCount + 1
+	} else if input.Status == types.NodeStatusFailed {
+		metaFields["running_nodes"] = runningCount - 1
+		metaFields["failed_nodes"] = a.intFromMap(metaMap, "failed_nodes") + 1
+		// Set total = total completed so far (including this one)
+		metaFields["total_nodes"] = completedCount + 1
 	}
 
 	pipe = a.redisClient.Pipeline()
@@ -220,6 +224,15 @@ func incrementField(m map[string]string, field string, delta int) int {
 func decrementField(m map[string]string, field string, delta int) int {
 	v, _ := fmt.Sscan(m[field], new(int))
 	return v - delta
+}
+
+func (a *DAGVisualActivities) intFromMap(m map[string]string, field string) int {
+	v, ok := m[field]
+	if !ok {
+		return 0
+	}
+	i, _ := fmt.Sscan(v, new(int))
+	return i
 }
 
 // EmitDAGNodeEvent emits a DAG node event for SSE

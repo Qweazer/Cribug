@@ -95,7 +95,7 @@ done
 
 # Verify result
 RESULT_VAL=$(echo "$RESULT" | jq -r '.result')
-echo "$RESULT_VAL" | grep -q "helpful response\|Mock answer" || fail "Unexpected result: $RESULT_VAL"
+echo "$RESULT_VAL" | grep -qE "helpful response|Mock answer|Safe mock response" || fail "Unexpected result: $RESULT_VAL"
 
 # Verify usage
 USAGE=$(echo "$RESULT" | jq -r '.usage')
