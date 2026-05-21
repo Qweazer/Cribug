@@ -106,30 +106,74 @@ func (a *DAGActivities) PlanDAG(ctx context.Context, input PlanDAGInput) (*PlanD
 	logger := activity.GetLogger(ctx)
 	logger.Info("PlanDAGActivity started", "task_id", input.TaskID)
 
-	// Generate 2-node DAG: analyze_input (mock) -> draft_answer (LLM)
+	// Generate 6-node complex DAG for better visualization:
+	// Layer 0: research (no deps)
+	// Layer 0: analyze (no deps)
+	// Layer 1: compare (depends on research, analyze)
+	// Layer 1: validate (depends on research, analyze)
+	// Layer 2: draft (depends on compare, validate)
+	// Layer 3: review (depends on draft)
 	plan := &types.DAGPlan{
 		TaskID: input.TaskID,
 		Nodes: []types.DAGNode{
 			{
-				ID:        "analyze_input",
+				ID:        "research",
 				Type:      "analysis",
-				Name:      "Analyze Input",
-				Input:     input.Query,
+				Name:      "Research Topic",
+				Input:     "Gather relevant information",
 				DependsOn: []string{},
-				UseLLM:    false, // mock node
+				UseLLM:    true, // LLM node for complexity
 			},
 			{
-				ID:        "draft_answer",
+				ID:        "analyze",
+				Type:      "analysis",
+				Name:      "Analyze Requirements",
+				Input:     "Break down the query into components",
+				DependsOn: []string{},
+				UseLLM:    true,
+			},
+			{
+				ID:        "compare",
 				Type:      "synthesis",
-				Name:      "Draft Answer",
-				Input:     "Synthesize analysis into answer",
-				DependsOn: []string{"analyze_input"},
-				UseLLM:    true, // LLM-backed node
+				Name:      "Compare Approaches",
+				Input:     "Compare different approaches",
+				DependsOn: []string{"research", "analyze"},
+				UseLLM:    true,
+			},
+			{
+				ID:        "validate",
+				Type:      "review",
+				Name:      "Validate Analysis",
+				Input:     "Check for gaps and inconsistencies",
+				DependsOn: []string{"research", "analyze"},
+				UseLLM:    false, // mock for diversity
+			},
+			{
+				ID:        "draft",
+				Type:      "synthesis",
+				Name:      "Draft Solution",
+				Input:     "Combine insights into solution",
+				DependsOn: []string{"compare", "validate"},
+				UseLLM:    true,
 				ReactConfig: input.ReactConfig,
+			},
+			{
+				ID:        "review",
+				Type:      "review",
+				Name:      "Final Review",
+				Input:     "Review and refine the answer",
+				DependsOn: []string{"draft"},
+				UseLLM:    true,
 			},
 		},
 		Edges: []types.DAGEdge{
-			{From: "analyze_input", To: "draft_answer"},
+			{From: "research", To: "compare"},
+			{From: "research", To: "validate"},
+			{From: "analyze", To: "compare"},
+			{From: "analyze", To: "validate"},
+			{From: "compare", To: "draft"},
+			{From: "validate", To: "draft"},
+			{From: "draft", To: "review"},
 		},
 	}
 
