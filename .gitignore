@@ -33,3 +33,6 @@ Thumbs.db
 
 # Temporal
 .history/
+
+# Local Go workspace (do not track)
+go/

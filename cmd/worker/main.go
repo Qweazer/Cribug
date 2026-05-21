@@ -86,6 +86,17 @@ func main() {
 	// Phase 3D: ReAct Activity
 	w.RegisterActivityWithOptions(reactActivities.ExecuteReActNode, activity.RegisterOptions{Name: "ExecuteReActNodeActivity"})
 
+	// Phase 4A: DAG Visualization Activities
+	dagVisualActivities := activities.NewDAGVisualActivities(cfg.RedisAddr, cfg.RedisPass, cfg.RedisDB, cfg.DAGTTLSeconds)
+	w.RegisterActivityWithOptions(dagVisualActivities.RecordDAGNodeStatus, activity.RegisterOptions{Name: "RecordDAGNodeStatus"})
+	w.RegisterActivityWithOptions(dagVisualActivities.BuildDAGVisualSnapshot, activity.RegisterOptions{Name: "BuildDAGVisualSnapshotActivity"})
+
+	// Phase 4A: ReAct Observability Activities
+	reactObsActivities := activities.NewReActObservabilityActivities(cfg.RedisAddr, cfg.RedisPass, cfg.RedisDB, cfg.DAGTTLSeconds)
+	w.RegisterActivityWithOptions(reactObsActivities.RecordAgentMetrics, activity.RegisterOptions{Name: "RecordAgentMetricsActivity"})
+	w.RegisterActivityWithOptions(reactObsActivities.AggregateAgentMetrics, activity.RegisterOptions{Name: "AggregateAgentMetricsActivity"})
+	w.RegisterActivityWithOptions(reactObsActivities.EmitMetricsSummary, activity.RegisterOptions{Name: "EmitMetricsSummaryActivity"})
+
 	// Phase 3C: Tool Activities
 	toolActivities := activities.NewToolActivities()
 	w.RegisterActivityWithOptions(toolActivities.ExecuteTool, activity.RegisterOptions{Name: "ExecuteToolActivity"})

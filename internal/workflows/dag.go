@@ -183,7 +183,7 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 	logger.Info("Nodes grouped into layers", "num_layers", len(nodeLayers))
 
 	// 2. Execute each layer concurrently
-	for _, layer := range nodeLayers {
+	for layerIdx, layer := range nodeLayers {
 		layerFutures := make(map[string]workflow.Future)
 
 		logger.Info("Executing DAG node layer", "layer_size", len(layer))
@@ -200,6 +200,18 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 				}
 			}
 
+			// ========== DAG Visualization: Record DAG_NODE_PENDING ==========
+			nowNs := workflow.Now(ctx).UnixNano()
+			workflow.ExecuteActivity(ctx, "RecordDAGNodeStatus", activities.RecordDAGNodeStatusInput{
+				TaskID:       req.TaskID,
+				WorkflowID:   req.WorkflowID,
+				NodeID:       node.ID,
+				Status:       types.NodeStatusPending,
+				Layer:        layerIdx,
+				Dependencies: node.DependsOn,
+				StartedAtNs: nowNs,
+			}).Get(ctx, nil)
+
 			// If LLM node, emit LLM_STARTED
 			if node.UseLLM {
 				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
@@ -208,7 +220,18 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 				}).Get(ctx, nil)
 			}
 
-			// Emit DAG_NODE_STARTED
+			// ========== DAG Visualization: Record DAG_NODE_RUNNING ==========
+			workflow.ExecuteActivity(ctx, "RecordDAGNodeStatus", activities.RecordDAGNodeStatusInput{
+				TaskID:       req.TaskID,
+				WorkflowID:   req.WorkflowID,
+				NodeID:       node.ID,
+				Status:       types.NodeStatusRunning,
+				Layer:        layerIdx,
+				Dependencies: node.DependsOn,
+				StartedAtNs:  nowNs,
+			}).Get(ctx, nil)
+
+			// Emit DAG_NODE_STARTED (kept for backward compatibility)
 			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 				TaskID: req.TaskID,
 				Event:  events.NewDAGNodeStartedEvent(req.TaskID, node.ID, node.Type),
@@ -323,17 +346,54 @@ Output your answer directly:`, req.Query, upstreamContext, node.Name, node.Type)
 				}
 			}
 
-			// Emit DAG_NODE_COMPLETED
-			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
-				TaskID: req.TaskID,
-				Event:  events.NewDAGNodeCompletedEvent(
-					req.TaskID,
-					nodeID,
-					nodeResults[nodeID].NodeType,
-					nodeResults[nodeID].Status,
-					nodeResults[nodeID].Output,
-				),
-			}).Get(ctx, nil)
+			// Emit DAG_NODE_COMPLETED or DAG_NODE_FAILED based on status
+			nowNs := workflow.Now(ctx).UnixNano()
+			if nodeResults[nodeID].Status == "failed" {
+				// ========== DAG Visualization: Record DAG_NODE_FAILED ==========
+				workflow.ExecuteActivity(ctx, "RecordDAGNodeStatus", activities.RecordDAGNodeStatusInput{
+					TaskID:        req.TaskID,
+					WorkflowID:    req.WorkflowID,
+					NodeID:        nodeID,
+					Status:        types.NodeStatusFailed,
+					Layer:         layerIdx,
+					CompletedAtNs: nowNs,
+					Error:         nodeResults[nodeID].Error,
+				}).Get(ctx, nil)
+
+				// Emit DAG_NODE_COMPLETED event for failure (backward compatibility)
+				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+					TaskID: req.TaskID,
+					Event:  events.NewDAGNodeCompletedEvent(
+						req.TaskID,
+						nodeID,
+						nodeResults[nodeID].NodeType,
+						nodeResults[nodeID].Status,
+						nodeResults[nodeID].Output,
+					),
+				}).Get(ctx, nil)
+			} else {
+				// ========== DAG Visualization: Record DAG_NODE_COMPLETED ==========
+				workflow.ExecuteActivity(ctx, "RecordDAGNodeStatus", activities.RecordDAGNodeStatusInput{
+					TaskID:        req.TaskID,
+					WorkflowID:    req.WorkflowID,
+					NodeID:        nodeID,
+					Status:        types.NodeStatusCompleted,
+					Layer:         layerIdx,
+					CompletedAtNs: nowNs,
+				}).Get(ctx, nil)
+
+				// Emit DAG_NODE_COMPLETED
+				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+					TaskID: req.TaskID,
+					Event:  events.NewDAGNodeCompletedEvent(
+						req.TaskID,
+						nodeID,
+						nodeResults[nodeID].NodeType,
+						nodeResults[nodeID].Status,
+						nodeResults[nodeID].Output,
+					),
+				}).Get(ctx, nil)
+			}
 		}
 	}
 

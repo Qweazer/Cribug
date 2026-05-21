@@ -30,6 +30,12 @@ const (
 	// ReAct events
 	EventTypeReActStep             = "REACT_STEP"
 	EventTypeReActCompleted        = "REACT_COMPLETED"
+	// DAG Visualization events (Slice 10)
+	EventTypeDAGNodePending        = "DAG_NODE_PENDING"
+	EventTypeDAGNodeRunning        = "DAG_NODE_RUNNING"
+	EventTypeDAGNodeFailed         = "DAG_NODE_FAILED"
+	// Agent Metrics events
+	EventTypeAgentMetricsSummary   = "AGENT_METRICS_SUMMARY"
 )
 
 type AgentEvent struct {
@@ -310,4 +316,66 @@ func NewReActCompletedEvent(taskID, nodeID string, iterations int, finalAnswer s
 		"final_answer":  finalAnswer,
 		"timestamp":     time.Now().UTC().Format(time.RFC3339),
 	})
+}
+
+// DAG Visualization events
+func NewDAGNodePendingEvent(taskID, workflowID, nodeID string, layer int, dependencies []string, timestampNs int64) AgentEvent {
+	return NewAgentEvent(EventTypeDAGNodePending, map[string]interface{}{
+		"task_id":      taskID,
+		"workflow_id":  workflowID,
+		"node_id":      nodeID,
+		"layer":        layer,
+		"dependencies": dependencies,
+		"status":       "pending",
+		"timestamp_ns": timestampNs,
+	})
+}
+
+func NewDAGNodeRunningEvent(taskID, workflowID, nodeID string, workerID string, timestampNs int64) AgentEvent {
+	return NewAgentEvent(EventTypeDAGNodeRunning, map[string]interface{}{
+		"task_id":      taskID,
+		"workflow_id":  workflowID,
+		"node_id":      nodeID,
+		"worker_id":    workerID,
+		"status":       "running",
+		"timestamp_ns": timestampNs,
+	})
+}
+
+// NewDAGNodeCompletedVisualEvent creates a DAG node completed event for visualization
+// This is separate from the original NewDAGNodeCompletedEvent for backward compatibility
+func NewDAGNodeCompletedVisualEvent(taskID, workflowID, nodeID string, timestampNs int64) AgentEvent {
+	return NewAgentEvent(EventTypeDAGNodeCompleted, map[string]interface{}{
+		"task_id":      taskID,
+		"workflow_id":  workflowID,
+		"node_id":      nodeID,
+		"status":       "completed",
+		"timestamp_ns": timestampNs,
+	})
+}
+
+func NewDAGNodeFailedEvent(taskID, workflowID, nodeID, errorMsg string, timestampNs int64) AgentEvent {
+	return NewAgentEvent(EventTypeDAGNodeFailed, map[string]interface{}{
+		"task_id":      taskID,
+		"workflow_id":  workflowID,
+		"node_id":      nodeID,
+		"status":       "failed",
+		"error":        errorMsg,
+		"timestamp_ns": timestampNs,
+	})
+}
+
+// Agent Metrics Summary event
+func NewAgentMetricsSummaryEvent(taskID, workflowID string, totalCallCount, totalTokens int, agentMetrics []map[string]interface{}) AgentEvent {
+	payload := map[string]interface{}{
+		"task_id":          taskID,
+		"workflow_id":      workflowID,
+		"total_call_count": totalCallCount,
+		"total_tokens":     totalTokens,
+		"timestamp":        time.Now().UTC().Format(time.RFC3339),
+	}
+	if len(agentMetrics) > 0 {
+		payload["agent_metrics"] = agentMetrics
+	}
+	return NewAgentEvent(EventTypeAgentMetricsSummary, payload)
 }
