@@ -23,7 +23,7 @@ except ImportError:
 STATUS_COLORS = {
     "pending": "#FFC107",    # Yellow
     "running": "#2196F3",    # Blue
-    "completed": "#4CAF50", # Green
+    "completed": "#4CAF50",  # Green
     "failed": "#F44336",     # Red
 }
 
@@ -103,6 +103,153 @@ def group_nodes_by_layer(nodes: dict) -> dict[int, list]:
     return dict(sorted(layers.items()))
 
 
+def generate_mermaid_graph(nodes: dict) -> str:
+    """Generate Mermaid graph definition from nodes."""
+    lines = ["graph TD"]
+    node_defs = set()
+    edges = []
+
+    for node_id, node_data in nodes.items():
+        status = node_data.get("status", "unknown")
+        color = STATUS_COLORS.get(status, "#9E9E9E")
+
+        # Create node definition with HTML-style label
+        deps = node_data.get("dependencies", [])
+        deps_str = ", ".join(deps) if deps else ""
+        layer = node_data.get("layer", 0)
+        label = f"{node_id}<br/><small>{status}</small>"
+        if deps_str:
+            label += f"<br/><small style='color:#888'>deps: {deps_str}</small>"
+
+        # Mermaid doesn't support HTML in node labels well, use simple labels
+        node_defs.add(f'    {node_id}["{node_id}"]')
+
+        # Add edges based on dependencies
+        for dep in deps:
+            if dep in nodes:
+                edges.append(f'    {dep} --> {node_id}')
+
+    # Build graph definition
+    result = []
+    for node_def in sorted(node_defs):
+        result.append(node_def)
+
+    # Only add edges if we have dependencies
+    if edges:
+        for edge in sorted(set(edges)):
+            result.append(edge)
+    else:
+        result.append('    subgraph "No dependencies defined"')
+        result.append('    end')
+
+    return "\n".join(result)
+
+
+def generate_svg_graph(nodes: dict) -> str:
+    """Generate SVG graph from nodes."""
+    if not nodes:
+        return '<text x="200" y="100" fill="#666">No nodes to display</text>'
+
+    # Group nodes by layer
+    layers = group_nodes_by_layer(nodes)
+
+    # Calculate positions
+    node_width = 140
+    node_height = 60
+    layer_spacing = 180
+    node_spacing = 100
+    margin_left = 50
+    margin_top = 50
+
+    # Calculate SVG dimensions
+    max_layer = max(layers.keys()) if layers else 0
+    nodes_in_layer = max(len(layer_nodes) for layer_nodes in layers.values()) if layers else 1
+
+    width = margin_left + (max_layer + 1) * layer_spacing + 100
+    height = margin_top + nodes_in_layer * node_spacing + 100
+
+    svg_parts = [f'<svg width="{width}" height="{height}" xmlns="http://www.w3.org/2000/svg">']
+
+    # Add arrow marker definition
+    svg_parts.append('''    <defs>
+        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#888"/>
+        </marker>
+    </defs>''')
+
+    # Calculate positions for each node
+    node_positions = {}
+    for layer, layer_nodes in layers.items():
+        layer_height = len(layer_nodes) * node_spacing
+        start_y = (height - layer_height) / 2
+
+        for i, node_info in enumerate(layer_nodes):
+            node_id = node_info["node_id"]
+            x = margin_left + layer * layer_spacing
+            y = start_y + i * node_spacing + node_height / 2
+            node_positions[node_id] = (x, y)
+
+    # Draw edges first (so they appear behind nodes)
+    drawn_edges = set()
+    for node_id, node_data in nodes.items():
+        deps = node_data.get("dependencies", [])
+        status = node_data.get("status", "unknown")
+        color = STATUS_COLORS.get(status, "#9E9E9E")
+
+        x, y = node_positions.get(node_id, (0, 0))
+        target_x = x + node_width
+        target_y = y
+
+        for dep in deps:
+            if dep in node_positions and (dep, node_id) not in drawn_edges:
+                dep_x, dep_y = node_positions[dep]
+                drawn_edges.add((dep, node_id))
+
+                # Draw curved arrow
+                mid_x = (dep_x + node_width + target_x) / 2
+                svg_parts.append(
+                    f'    <path d="M {dep_x + node_width},{dep_y} '
+                    f'C {mid_x},{dep_y} {mid_x},{target_y} {target_x},{target_y}" '
+                    f'stroke="#888" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>'
+                )
+
+    # Draw nodes
+    for node_id, node_data in nodes.items():
+        status = node_data.get("status", "unknown")
+        color = STATUS_COLORS.get(status, "#9E9E9E")
+        deps = node_data.get("dependencies", [])
+        layer = node_data.get("layer", 0)
+
+        x, y = node_positions.get(node_id, (0, 0))
+
+        # Node box
+        svg_parts.append(
+            f'    <rect x="{x}" y="{y - node_height/2}" width="{node_width}" height="{node_height}" '
+            f'rx="8" fill="{color}20" stroke="{color}" stroke-width="2"/>'
+        )
+
+        # Node label
+        svg_parts.append(
+            f'    <text x="{x + node_width/2}" y="{y - 5}" text-anchor="middle" '
+            f'font-family="Segoe UI,sans-serif" font-size="14" font-weight="bold" fill="#eee">{node_id}</text>'
+        )
+
+        # Status label
+        svg_parts.append(
+            f'    <text x="{x + node_width/2}" y="{y + 15}" text-anchor="middle" '
+            f'font-family="Segoe UI,sans-serif" font-size="11" fill="{color}">{status}</text>'
+        )
+
+        # Layer indicator
+        svg_parts.append(
+            f'    <text x="{x + node_width/2}" y="{y + node_height/2 - 5}" text-anchor="middle" '
+            f'font-family="Segoe UI,sans-serif" font-size="9" fill="#888">Layer {layer}</text>'
+        )
+
+    svg_parts.append('</svg>')
+    return "\n".join(svg_parts)
+
+
 def generate_html(workflow_id: str, dag_state: dict) -> str:
     """Generate HTML dashboard."""
     meta = dag_state.get("meta", {})
@@ -152,6 +299,9 @@ def generate_html(workflow_id: str, dag_state: dict) -> str:
             """)
 
     nodes_html = "\n".join(node_rows) if node_rows else "<tr><td colspan='8' class='no-data'>No nodes found</td></tr>"
+
+    # Generate SVG graph
+    svg_graph = generate_svg_graph(nodes)
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -203,6 +353,11 @@ def generate_html(workflow_id: str, dag_state: dict) -> str:
         .no-data {{ text-align: center; color: #666; padding: 30px; }}
 
         .footer {{ margin-top: 20px; text-align: center; color: #666; font-size: 0.75rem; }}
+
+        /* SVG Graph */
+        .graph-container {{ background: #16213e; border-radius: 12px; padding: 20px; margin-bottom: 25px; overflow-x: auto; }}
+        .graph-container h2 {{ color: #fff; margin-bottom: 15px; font-size: 1rem; }}
+        .graph-svg {{ display: block; margin: 0 auto; }}
     </style>
 </head>
 <body>
@@ -237,6 +392,13 @@ def generate_html(workflow_id: str, dag_state: dict) -> str:
             <div class="legend-item"><div class="legend-dot" style="background: {STATUS_COLORS['running']}"></div> Running</div>
             <div class="legend-item"><div class="legend-dot" style="background: {STATUS_COLORS['completed']}"></div> Completed</div>
             <div class="legend-item"><div class="legend-dot" style="background: {STATUS_COLORS['failed']}"></div> Failed</div>
+        </div>
+
+        <div class="graph-container">
+            <h2>DAG Graph (Dependencies)</h2>
+            <div class="graph-svg">
+                {svg_graph}
+            </div>
         </div>
 
         <div class="table-container">

@@ -5,7 +5,7 @@ type DAGNodeStatus struct {
 	NodeID        string   `json:"node_id"`
 	Status        string   `json:"status"` // pending, running, completed, failed
 	Layer         int      `json:"layer"`
-	Dependencies  []string `json:"dependencies,omitempty"`
+	Dependencies  []string `json:"dependencies"` // Always include, even if empty
 	StartedAtNs   int64    `json:"started_at_ns,omitempty"`
 	CompletedAtNs int64    `json:"completed_at_ns,omitempty"`
 	Error         string   `json:"error,omitempty"`

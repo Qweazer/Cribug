@@ -47,34 +47,82 @@ type RecordDAGNodeStatusInput struct {
 }
 
 // RecordDAGNodeStatusActivity records a DAG node status to Redis and emits SSE event
+// This method implements merge logic to preserve existing fields while updating status
 func (a *DAGVisualActivities) RecordDAGNodeStatus(ctx context.Context, input RecordDAGNodeStatusInput) error {
 	logger := activity.GetLogger(ctx)
 	logger.Info("RecordDAGNodeStatusActivity started",
 		"task_id", input.TaskID,
 		"node_id", input.NodeID,
-		"status", input.Status)
+		"status", input.Status,
+		"dependencies", fmt.Sprintf("%v", input.Dependencies))
 
-	// Build node status JSON
-	nodeStatus := types.DAGNodeStatus{
-		NodeID:        input.NodeID,
-		Status:        input.Status,
-		Layer:         input.Layer,
-		Dependencies:  input.Dependencies,
-		StartedAtNs:   input.StartedAtNs,
-		CompletedAtNs: input.CompletedAtNs,
+	nodesKey := fmt.Sprintf("dag:%s:nodes", input.WorkflowID)
+
+	// ========== Step 1: Read existing node JSON from Redis (if any) ==========
+	var existingNode types.DAGNodeStatus
+	existingJSON, err := a.redisClient.HGet(ctx, nodesKey, input.NodeID).Result()
+	if err == nil && existingJSON != "" {
+		if unmarshalErr := json.Unmarshal([]byte(existingJSON), &existingNode); unmarshalErr == nil {
+			logger.Info("Found existing node, will merge", "node_id", input.NodeID, "existing_status", existingNode.Status)
+		}
 	}
+
+	// ========== Step 2: Merge fields ==========
+	nodeStatus := types.DAGNodeStatus{
+		NodeID: input.NodeID, // Always use input node_id
+		Status: input.Status, // Always update to latest status
+		Layer:  input.Layer,  // Always use input layer
+	}
+
+	// Merge dependencies: if input has non-empty deps, use them; otherwise keep existing
+	if len(input.Dependencies) > 0 {
+		nodeStatus.Dependencies = input.Dependencies
+	} else if len(existingNode.Dependencies) > 0 {
+		nodeStatus.Dependencies = existingNode.Dependencies
+	} else {
+		// Always set to empty array, never nil
+		nodeStatus.Dependencies = []string{}
+	}
+
+	// Merge timestamps:
+	// - started_at_ns: set on first running, preserved on subsequent updates
+	// - completed_at_ns: set on completed/failed
+	if input.Status == types.NodeStatusRunning {
+		if input.StartedAtNs > 0 {
+			nodeStatus.StartedAtNs = input.StartedAtNs
+		} else if existingNode.StartedAtNs > 0 {
+			nodeStatus.StartedAtNs = existingNode.StartedAtNs
+		}
+	} else if input.Status == types.NodeStatusCompleted || input.Status == types.NodeStatusFailed {
+		// Preserve existing started_at_ns
+		nodeStatus.StartedAtNs = existingNode.StartedAtNs
+		// Set completed_at_ns
+		if input.CompletedAtNs > 0 {
+			nodeStatus.CompletedAtNs = input.CompletedAtNs
+		}
+	}
+
+	// Merge error: set on failure, preserve empty otherwise
 	if input.Error != "" {
 		nodeStatus.Error = input.Error
+	} else {
+		nodeStatus.Error = existingNode.Error
 	}
 
+	// ========== Step 3: Write merged node status to Redis ==========
 	nodeJSON, err := json.Marshal(nodeStatus)
 	if err != nil {
 		logger.Error("Failed to marshal node status", "error", err)
 		return err
 	}
 
-	// Write to Redis: dag:{workflow_id}:nodes
-	nodesKey := fmt.Sprintf("dag:%s:nodes", input.WorkflowID)
+	logger.Info("Writing merged node status",
+		"node_id", input.NodeID,
+		"status", nodeStatus.Status,
+		"dependencies", fmt.Sprintf("%v", nodeStatus.Dependencies),
+		"started_at_ns", nodeStatus.StartedAtNs,
+		"completed_at_ns", nodeStatus.CompletedAtNs)
+
 	pipe := a.redisClient.Pipeline()
 	pipe.HSet(ctx, nodesKey, input.NodeID, string(nodeJSON))
 	pipe.Expire(ctx, nodesKey, time.Duration(a.ttl)*time.Second)
