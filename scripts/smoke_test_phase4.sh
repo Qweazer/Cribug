@@ -57,6 +57,16 @@ else
   log "WARNING: test_react_real_llm_smoke.sh not found, skipping"
 fi
 
+# Slice 12: Token LRU Cache
+log ""
+log "--- Slice 12: Token LRU Cache ---"
+if [ -f "$SCRIPT_DIR/test_token_lru_cache.sh" ]; then
+  bash "$SCRIPT_DIR/test_token_lru_cache.sh" || fail "test_token_lru_cache.sh failed"
+  log "Slice 12 Token LRU cache: PASSED"
+else
+  log "WARNING: test_token_lru_cache.sh not found, skipping"
+fi
+
 # Multi-agent lite full (regression)
 log ""
 log "--- Multi-Agent Lite Full (regression) ---"

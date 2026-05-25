@@ -19,3 +19,10 @@ features:
 
   # Real LLM testing (off by default, requires OPENAI_API_KEY)
   real_llm_test: false
+
+  # Phase 4C Slice 12: Two-level token LRU cache
+  enable_token_lru_cache: true
+  l1_cache_ttl_seconds: 300
+  l1_cache_capacity: 10000
+  l2_cache_ttl_seconds: 3600
+  redis_lru_stats_key: lru:stats

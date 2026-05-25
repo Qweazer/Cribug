@@ -144,6 +144,28 @@ func (c *Client) Keys(ctx context.Context, pattern string) ([]string, error) {
 	return c.client.Keys(ctx, pattern).Result()
 }
 
+// ── String KV operations for L2 token cache ───────────────────
+
+func (c *Client) Get(ctx context.Context, key string) (string, error) {
+	return c.client.Get(ctx, key).Result()
+}
+
+func (c *Client) Set(ctx context.Context, key string, value string, ttl time.Duration) error {
+	return c.client.Set(ctx, key, value, ttl).Err()
+}
+
+func (c *Client) Expire(ctx context.Context, key string, ttl time.Duration) error {
+	return c.client.Expire(ctx, key, ttl).Err()
+}
+
+func (c *Client) HIncrBy(ctx context.Context, key, field string, incr int64) (int64, error) {
+	return c.client.HIncrBy(ctx, key, field, incr).Result()
+}
+
+func (c *Client) HSet(ctx context.Context, key string, fields map[string]interface{}) error {
+	return c.client.HSet(ctx, key, fields).Err()
+}
+
 func parseInt(s string) int {
 	i, _ := strconv.Atoi(s)
 	return i

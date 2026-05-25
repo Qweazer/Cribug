@@ -385,7 +385,7 @@ Gateway cannot reach Temporal:
 |-------|--------|-------------|
 | Slice 10 | ✅ | DAG Visualization & ReAct Observability - Redis Hash node state, SSE events, GET /dag endpoint |
 | Slice 11 | ✅ | Workflow-level ReAct Loop - ReactLoop in Workflow layer, react_steps audit, Activity retry-safe history |
-| Slice 12 | Future | Two-Level LRU Cache |
+| Slice 12 | ✅ | Two-Level LRU Cache — LocalLRU (L1) + Redis String/KV (L2) for token counts |
 | Slice 13 | Future | DAG Dynamic Replanning |
 
 ### Phase 4B Slice 11: Workflow-level ReAct
@@ -434,6 +434,21 @@ go run ./cmd/worker
 The default Python LLM service uses deterministic mock responses. The smoke test
 validates that `llm_calls.provider` is not `"mock"`, so a mock service will cause
 a hard failure.
+
+### Phase 4C Slice 12: Two-Level Token LRU Cache
+
+Architecture:
+- **L1 LocalLRU**: process-local mutex+list+map LRU, 5min TTL, 10000 capacity
+- **L2 Redis String/KV**: cross-worker shared cache, 1h TTL, key `lru:tiktoken:{model}:{sha256}`
+- Cache path: L1 hit → return | L1 miss → L2 hit → backfill L1 | both miss → python /tokenize → backfill L1+L2
+- Stats tracked in `lru:stats` Redis hash: hits, misses, local_hits, redis_hits, python_calls, fallback_calls
+- EstimatePromptTokensActivity sources: `local_lru` | `redis` | `python_service` | `fallback`
+- Redis unavailable → falls back, never blocks
+
+Testing:
+```bash
+bash scripts/test_token_lru_cache.sh
+```
 
 ## What We DON'T Do (Yet)
 

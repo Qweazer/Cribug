@@ -3,33 +3,30 @@ package activities
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
 	"time"
 
-	gocache "github.com/patrickmn/go-cache"
+	redisclient "cribug/internal/redis"
 
 	"go.temporal.io/sdk/activity"
 )
 
-// Global token cache with 10 minute TTL
-var tokenCache = gocache.New(10*time.Minute, 5*time.Minute)
-
 type BudgetActivities struct {
 	llmServiceURL string
 	httpClient    *http.Client
+	tokenCache    *TwoLevelTokenCache
 }
 
-func NewBudgetActivities(llmServiceURL string) *BudgetActivities {
+func NewBudgetActivities(llmServiceURL string, redisClient *redisclient.Client) *BudgetActivities {
 	return &BudgetActivities{
 		llmServiceURL: llmServiceURL,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
+		tokenCache: NewTwoLevelTokenCache(redisClient, 10000, 5*time.Minute, 1*time.Hour),
 	}
 }
 
@@ -40,48 +37,60 @@ type EstimatePromptTokensInput struct {
 
 type EstimatePromptTokensOutput struct {
 	EstimatedPromptTokens int
-	Cached               bool
-}
-
-// hash256 creates a SHA256 hash of text+model for cache key
-func hash256(text, model string) string {
-	h := sha256.New()
-	h.Write([]byte(text + model))
-	return hex.EncodeToString(h.Sum(nil))[:16] // Use first 16 chars for shorter key
+	Cached                bool
+	Source                string // local_lru, redis, python_service, fallback
 }
 
 func (a *BudgetActivities) EstimatePromptTokens(ctx context.Context, input EstimatePromptTokensInput) (*EstimatePromptTokensOutput, error) {
 	logger := activity.GetLogger(ctx)
 	logger.Info("EstimatePromptTokensActivity started", "text_len", len(input.Text), "model", input.Model)
 
-	// 1. Check cache first
-	cacheKey := hash256(input.Text, input.Model)
-	if cached, found := tokenCache.Get(cacheKey); found {
-		logger.Info("EstimatePromptTokensActivity: cache hit", "key", cacheKey)
-		return &EstimatePromptTokensOutput{
-			EstimatedPromptTokens: cached.(int),
-			Cached:               true,
-		}, nil
+	// 1. Check two-level cache
+	if a.tokenCache != nil {
+		result := a.tokenCache.Get(ctx, input.Model, input.Text)
+		if result.Cached {
+			logger.Info("EstimatePromptTokensActivity: cache hit", "source", result.Source, "count", result.Count)
+			return &EstimatePromptTokensOutput{
+				EstimatedPromptTokens: result.Count,
+				Cached:                true,
+				Source:                result.Source,
+			}, nil
+		}
 	}
 
 	// 2. Call /tokenize endpoint
 	estimated, err := a.callTokenize(ctx, input.Text, input.Model)
 	if err != nil {
 		logger.Warn("EstimatePromptTokensActivity: tokenize failed, using fallback", "error", err)
-		// Fallback to rough estimate
 		estimated = int(math.Ceil(float64(len(input.Text)) / 4.0))
 		if estimated < 1 {
 			estimated = 1
 		}
+		if a.tokenCache != nil {
+			a.tokenCache.RecordFallback(ctx)
+		}
+		// Store in cache even for fallback
+		if a.tokenCache != nil {
+			a.tokenCache.Set(ctx, input.Model, input.Text, estimated)
+		}
+		return &EstimatePromptTokensOutput{
+			EstimatedPromptTokens: estimated,
+			Cached:                false,
+			Source:                "fallback",
+		}, nil
 	}
 
-	// 3. Store in cache
-	tokenCache.Set(cacheKey, estimated, gocache.DefaultExpiration)
+	// 3. Store in two-level cache
+	if a.tokenCache != nil {
+		a.tokenCache.RecordPythonCall(ctx)
+		a.tokenCache.Set(ctx, input.Model, input.Text, estimated)
+	}
 
-	logger.Info("EstimatePromptTokensActivity completed", "estimated", estimated, "cached", false)
+	logger.Info("EstimatePromptTokensActivity completed", "estimated", estimated, "source", "python_service")
 	return &EstimatePromptTokensOutput{
 		EstimatedPromptTokens: estimated,
-		Cached:               false,
+		Cached:                false,
+		Source:                "python_service",
 	}, nil
 }
 
@@ -111,16 +120,24 @@ func (a *BudgetActivities) callTokenize(ctx context.Context, text, model string)
 	}
 
 	var result struct {
-		TokenCount int  `json:"token_count"`
-		Encoding  string `json:"encoding,omitempty"`
-		Model     string `json:"model,omitempty"`
-		Fallback  bool   `json:"fallback,omitempty"`
+		TokenCount int    `json:"token_count"`
+		Encoding   string `json:"encoding,omitempty"`
+		Model      string `json:"model,omitempty"`
+		Fallback   bool   `json:"fallback,omitempty"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return 0, fmt.Errorf("decode response: %w", err)
 	}
 
 	return result.TokenCount, nil
+}
+
+// GetCacheStats returns the current lru:stats from Redis.
+func (a *BudgetActivities) GetCacheStats(ctx context.Context) map[string]string {
+	if a.tokenCache == nil {
+		return nil
+	}
+	return a.tokenCache.GetStats(ctx)
 }
 
 type CheckBudgetInput struct {
@@ -130,8 +147,8 @@ type CheckBudgetInput struct {
 }
 
 type CheckBudgetOutput struct {
-	Allowed               bool
-	Reason                string
+	Allowed                 bool
+	Reason                  string
 	AllowedCompletionTokens int
 }
 
@@ -142,7 +159,6 @@ func (a *BudgetActivities) CheckBudget(ctx context.Context, input CheckBudgetInp
 		"max_total_tokens", input.MaxTotalTokens,
 		"max_completion_tokens", input.MaxCompletionTokens)
 
-	// Apply defaults
 	maxTotal := input.MaxTotalTokens
 	maxCompletion := input.MaxCompletionTokens
 

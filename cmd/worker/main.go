@@ -44,7 +44,7 @@ func main() {
 	emitEventActivity := activities.NewEmitEventActivity(redisClient)
 	agentActivities := activities.NewAgentActivities(cfg.LLMServiceURL)
 	sessionActivities := activities.NewSessionActivities(redisClient)
-	budgetActivities := activities.NewBudgetActivities(cfg.LLMServiceURL)
+	budgetActivities := activities.NewBudgetActivities(cfg.LLMServiceURL, redisClient)
 	usageActivities := activities.NewUsageActivities(dbClient.Stdlib())
 	dagActivities := activities.NewDAGActivities(dbClient.Stdlib(), cfg.LLMServiceURL, cfg.RedisAddr, cfg.RedisPass, cfg.RedisDB, cfg.DAGTTLSeconds)
 	multiAgentActivities := activities.NewMultiAgentActivities(cfg.LLMServiceURL)
