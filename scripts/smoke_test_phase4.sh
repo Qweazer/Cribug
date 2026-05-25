@@ -67,6 +67,16 @@ else
   log "WARNING: test_token_lru_cache.sh not found, skipping"
 fi
 
+# Slice 13: DAG Dynamic Replanning
+log ""
+log "--- Slice 13: DAG Dynamic Replanning ---"
+if [ -f "$SCRIPT_DIR/test_dag_dynamic_replan.sh" ]; then
+  bash "$SCRIPT_DIR/test_dag_dynamic_replan.sh" || fail "test_dag_dynamic_replan.sh failed"
+  log "Slice 13 DAG dynamic replan: PASSED"
+else
+  log "WARNING: test_dag_dynamic_replan.sh not found, skipping"
+fi
+
 # Multi-agent lite full (regression)
 log ""
 log "--- Multi-Agent Lite Full (regression) ---"

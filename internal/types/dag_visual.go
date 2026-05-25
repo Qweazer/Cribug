@@ -37,4 +37,5 @@ const (
 	NodeStatusRunning   = "running"
 	NodeStatusCompleted = "completed"
 	NodeStatusFailed    = "failed"
+	NodeStatusSkipped   = "skipped"
 )

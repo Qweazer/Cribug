@@ -20,6 +20,11 @@ features:
   # Real LLM testing (off by default, requires OPENAI_API_KEY)
   real_llm_test: false
 
+  # Phase 4D Slice 13: DAG Dynamic Replanning
+  enable_dag_dynamic_replan: true
+  dag_failure_policy: skip_dependents
+  dag_replan_emit_summary: true
+
   # Phase 4C Slice 12: Two-level token LRU cache
   enable_token_lru_cache: true
   l1_cache_ttl_seconds: 300

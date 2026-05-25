@@ -163,6 +163,7 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 
 	// 11. Execute DAG nodes with concurrent execution per layer
 	nodeResults := make(map[string]types.DAGNodeResult)
+	skippedNodes := make(map[string]bool) // nodes skipped due to upstream failures
 	llmNodes := 0
 	totalTokens := 0
 	var totalPromptTokens, totalCompletionTokens int
@@ -193,7 +194,54 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 		for _, node := range layer {
 			logger.Info("Executing DAG node", "node_id", node.ID, "use_llm", node.UseLLM)
 
-			// Build upstream results
+				// Check if this node should be skipped (upstream dependency failed/skipped)
+				shouldSkip := false
+				var skipReason string
+				if skippedNodes[node.ID] {
+					shouldSkip = true
+					skipReason = "node marked skipped due to upstream failure"
+				}
+				if !shouldSkip {
+					for _, depID := range node.DependsOn {
+						if depResult, ok := nodeResults[depID]; ok {
+							if depResult.Status == "failed" || depResult.Status == "skipped" {
+								shouldSkip = true
+								skipReason = fmt.Sprintf("upstream node '%s' %s", depID, depResult.Status)
+								skippedNodes[node.ID] = true
+								break
+							}
+						}
+					}
+				}
+
+				if shouldSkip {
+					logger.Warn("Skipping DAG node", "node_id", node.ID, "reason", skipReason)
+					nowNs := workflow.Now(ctx).UnixNano()
+					nodeResults[node.ID] = types.DAGNodeResult{
+						TaskID:        req.TaskID,
+						NodeID:        node.ID,
+						NodeType:      node.Type,
+						Status:        "skipped",
+						SkippedReason: skipReason,
+					}
+					workflow.ExecuteActivity(ctx, "RecordDAGNodeStatus", activities.RecordDAGNodeStatusInput{
+						TaskID:        req.TaskID,
+						WorkflowID:    req.WorkflowID,
+						NodeID:        node.ID,
+						Status:        types.NodeStatusSkipped,
+						Layer:         layerIdx,
+						Dependencies:  node.DependsOn,
+						CompletedAtNs: nowNs,
+						Error:         skipReason,
+					}).Get(ctx, nil)
+					workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+						TaskID: req.TaskID,
+						Event:  events.NewDAGNodeCompletedEvent(req.TaskID, node.ID, node.Type, "skipped", skipReason),
+					}).Get(ctx, nil)
+					continue
+				}
+
+				// Build upstream results
 			upstreamResults := make(map[string]types.DAGNodeResult)
 			for _, depID := range node.DependsOn {
 				if result, ok := nodeResults[depID]; ok {
@@ -385,6 +433,29 @@ Output your answer directly:`, req.Query, upstreamContext, node.Name, node.Type)
 					NodeType: "", // Will be populated from plan lookup
 					Status:   "failed",
 					Error:    err.Error(),
+				}
+				skippedNodes[nodeID] = true
+
+				// Call HandleDAGNodeFailureActivity to propagate skip to dependents
+				allNodeIDs := make([]string, 0, len(plan.Nodes))
+				for _, n := range plan.Nodes {
+					allNodeIDs = append(allNodeIDs, n.ID)
+				}
+				failureOutput := &types.HandleDAGNodeFailureOutput{}
+				_ = workflow.ExecuteActivity(ctx, "HandleDAGNodeFailureActivity", types.HandleDAGNodeFailureInput{
+					WorkflowID:   req.WorkflowID,
+					TaskID:       req.TaskID,
+					FailedNodeID: nodeID,
+					Error:        err.Error(),
+					FailedAtNs:   workflow.Now(ctx).UnixNano(),
+					AllNodeIDs:   allNodeIDs,
+				}).Get(ctx, failureOutput)
+				if failureOutput != nil && len(failureOutput.SkippedNodes) > 0 {
+					for _, sid := range failureOutput.SkippedNodes {
+						skippedNodes[sid] = true
+					}
+					logger.Info("DAG replan: nodes skipped due to failure",
+						"failed_node", nodeID, "skipped", failureOutput.SkippedNodes)
 				}
 			} else {
 				nodeResults[nodeID] = *dagOutput.Result

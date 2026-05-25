@@ -107,6 +107,10 @@ func main() {
 	w.RegisterActivityWithOptions(reactObsActivities.AggregateAgentMetrics, activity.RegisterOptions{Name: "AggregateAgentMetricsActivity"})
 	w.RegisterActivityWithOptions(reactObsActivities.EmitMetricsSummary, activity.RegisterOptions{Name: "EmitMetricsSummaryActivity"})
 
+	// Phase 4D Slice 13: DAG Dynamic Replanning
+	dagFallbackActivities := activities.NewDAGFallbackActivities(cfg.RedisAddr, cfg.RedisPass, cfg.RedisDB, cfg.DAGTTLSeconds)
+	w.RegisterActivityWithOptions(dagFallbackActivities.HandleDAGNodeFailure, activity.RegisterOptions{Name: "HandleDAGNodeFailureActivity"})
+
 	// Phase 3C: Tool Activities
 	toolActivities := activities.NewToolActivities()
 	w.RegisterActivityWithOptions(toolActivities.ExecuteTool, activity.RegisterOptions{Name: "ExecuteToolActivity"})

@@ -386,7 +386,7 @@ Gateway cannot reach Temporal:
 | Slice 10 | ✅ | DAG Visualization & ReAct Observability - Redis Hash node state, SSE events, GET /dag endpoint |
 | Slice 11 | ✅ | Workflow-level ReAct Loop - ReactLoop in Workflow layer, react_steps audit, Activity retry-safe history |
 | Slice 12 | ✅ | Two-Level LRU Cache — LocalLRU (L1) + Redis String/KV (L2) for token counts |
-| Slice 13 | Future | DAG Dynamic Replanning |
+| Slice 13 | ✅ | DAG Dynamic Replanning — node failure → skip dependents, independent branches continue |
 
 ### Phase 4B Slice 11: Workflow-level ReAct
 
@@ -448,6 +448,21 @@ Architecture:
 Testing:
 ```bash
 bash scripts/test_token_lru_cache.sh
+```
+
+### Phase 4D Slice 13: DAG Dynamic Replanning
+
+When a DAG node fails:
+- `HandleDAGNodeFailureActivity` marks it failed in Redis with error
+- All direct+transitive dependents are marked `skipped` via BFS propagation
+- Independent branches continue executing unaffected
+- SynthesisActivity supports partial success (some completed, some failed/skipped)
+- New events: `DAG_NODE_SKIPPED`, `DAG_NODE_FAILED`, `DAG_REPLAN_SUMMARY`
+- Redis node statuses use merge semantics (dependencies/layer/timestamps preserved)
+
+Testing:
+```bash
+bash scripts/test_dag_dynamic_replan.sh
 ```
 
 ## What We DON'T Do (Yet)

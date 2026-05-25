@@ -36,6 +36,9 @@ const (
 	EventTypeDAGNodeFailed         = "DAG_NODE_FAILED"
 	// Agent Metrics events
 	EventTypeAgentMetricsSummary   = "AGENT_METRICS_SUMMARY"
+	// DAG Dynamic Replanning events (Slice 13)
+	EventTypeDAGNodeSkipped        = "DAG_NODE_SKIPPED"
+	EventTypeDAGReplanSummary      = "DAG_REPLAN_SUMMARY"
 )
 
 type AgentEvent struct {
@@ -362,6 +365,32 @@ func NewDAGNodeFailedEvent(taskID, workflowID, nodeID, errorMsg string, timestam
 		"status":       "failed",
 		"error":        errorMsg,
 		"timestamp_ns": timestampNs,
+	})
+}
+
+// NewDAGNodeSkippedEvent creates a DAG node skipped event (Slice 13)
+func NewDAGNodeSkippedEvent(taskID, workflowID, nodeID, reason string, timestampNs int64) AgentEvent {
+	return NewAgentEvent(EventTypeDAGNodeSkipped, map[string]interface{}{
+		"task_id":      taskID,
+		"workflow_id":  workflowID,
+		"node_id":      nodeID,
+		"status":       "skipped",
+		"skipped_reason": reason,
+		"timestamp_ns": timestampNs,
+	})
+}
+
+// NewDAGReplanSummaryEvent creates a DAG replan summary event (Slice 13)
+func NewDAGReplanSummaryEvent(taskID, workflowID, failedNodeID string, skippedNodes, affectedNodes []string, remainingCount int) AgentEvent {
+	return NewAgentEvent(EventTypeDAGReplanSummary, map[string]interface{}{
+		"task_id":             taskID,
+		"workflow_id":         workflowID,
+		"failed_node_id":      failedNodeID,
+		"skipped_nodes":       skippedNodes,
+		"affected_nodes":      affectedNodes,
+		"remaining_executable": remainingCount,
+		"replan_applied":      true,
+		"timestamp":           time.Now().UTC().Format(time.RFC3339),
 	})
 }
 

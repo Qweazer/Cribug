@@ -526,6 +526,8 @@ func (a *DAGActivities) Synthesis(ctx context.Context, input SynthesisInput) (*S
 	// Aggregate results from node results map
 	nodeCount := len(input.Plan.Nodes)
 	completedNodes := 0
+	failedNodes := 0
+	skippedNodes := 0
 	var finalAnswerParts []string
 
 	for _, node := range input.Plan.Nodes {
@@ -534,18 +536,24 @@ func (a *DAGActivities) Synthesis(ctx context.Context, input SynthesisInput) (*S
 			logger.Warn("Missing result for node", "node_id", node.ID)
 			continue
 		}
-		if result.Status == "completed" {
+		switch result.Status {
+		case "completed":
 			completedNodes++
-			// Collect LLM node output for final answer (draft is the ReAct node, review is the final LLM node)
 			if result.Output != "" && (node.ID == "draft" || node.ID == "review") {
 				finalAnswerParts = append(finalAnswerParts, result.Output)
 			}
+		case "failed":
+			failedNodes++
+		case "skipped":
+			skippedNodes++
 		}
 	}
 
-	// Check if all nodes completed
-	if completedNodes < nodeCount {
-		return nil, fmt.Errorf("synthesis failed: only %d/%d nodes completed", completedNodes, nodeCount)
+	// Allow partial success (Slice 13): at least one node completed
+	partialSuccess := (failedNodes > 0 || skippedNodes > 0) && completedNodes > 0
+	if completedNodes == 0 && nodeCount > 0 {
+		return nil, fmt.Errorf("synthesis failed: 0/%d completed, %d failed, %d skipped",
+			nodeCount, failedNodes, skippedNodes)
 	}
 
 	// Query llm_calls for usage aggregation
@@ -560,32 +568,39 @@ func (a *DAGActivities) Synthesis(ctx context.Context, input SynthesisInput) (*S
 		&totalPromptTokens, &totalCompletionTokens, &totalTokens, &llmNodes)
 	if err != nil && err != sql.ErrNoRows {
 		logger.Error("Failed to aggregate usage from llm_calls", "error", err)
-		// Continue with zeros rather than failing
 	}
 
 	// Build final answer
 	var finalAnswer string
 	if len(finalAnswerParts) > 0 {
 		finalAnswer = finalAnswerParts[0]
+	} else if partialSuccess {
+		finalAnswer = fmt.Sprintf("partial success: %d completed, %d failed, %d skipped out of %d nodes",
+			completedNodes, failedNodes, skippedNodes, nodeCount)
 	} else {
 		finalAnswer = "dag synthesized: " + input.Query
 	}
 
 	result := &types.DAGSynthesisResult{
-		TaskID:              input.TaskID,
-		FinalAnswer:         finalAnswer,
-		NodeCount:           nodeCount,
-		CompletedNodes:      completedNodes,
-		LLMNodes:           llmNodes,
-		TotalPromptTokens:   totalPromptTokens,
+		TaskID:               input.TaskID,
+		FinalAnswer:          finalAnswer,
+		NodeCount:            nodeCount,
+		CompletedNodes:       completedNodes,
+		FailedNodes:          failedNodes,
+		SkippedNodes:         skippedNodes,
+		PartialSuccess:       partialSuccess,
+		LLMNodes:             llmNodes,
+		TotalPromptTokens:    totalPromptTokens,
 		TotalCompletionTokens: totalCompletionTokens,
-		TotalTokens:        totalTokens,
+		TotalTokens:          totalTokens,
 	}
 
 	logger.Info("SynthesisActivity completed",
 		"task_id", input.TaskID,
 		"node_count", result.NodeCount,
 		"completed_nodes", result.CompletedNodes,
+		"failed_nodes", result.FailedNodes,
+		"skipped_nodes", result.SkippedNodes,
 		"llm_nodes", result.LLMNodes,
 		"total_tokens", result.TotalTokens)
 
