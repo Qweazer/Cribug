@@ -135,7 +135,26 @@ RESULT=$(curl --noproxy '*' -s "$GATEWAY_URL/api/v1/tasks/$TASK_ID" | jq -r '.re
 if [ -z "$RESULT" ]; then
   fail "Result is empty"
 fi
-log "  Result non-empty: PASSED (preview: ${RESULT:0:80}...)"
+log "  Result non-empty: PASSED (preview: ${RESULT:0:120}...)"
+
+# ── Weak semantic assertion: must contain Paris or 巴黎 ──────────
+if echo "$RESULT" | grep -Eiq "Paris|巴黎"; then
+  log "  Result contains Paris/巴黎: PASSED"
+else
+  fail "Result does not contain Paris or 巴黎 — LLM answer not propagated. Result preview: ${RESULT:0:200}"
+fi
+
+# ── Defensive: result must NOT be the original query ─────────────
+ORIG_QUERY="What is the capital of France? Answer in one sentence."
+if [ "$RESULT" = "$ORIG_QUERY" ]; then
+  fail "Result is identical to the original query — LLM answer not propagated."
+fi
+
+# ── Defensive: result must NOT be the "dag synthesized" fallback ─
+if echo "$RESULT" | grep -qi "dag synthesized"; then
+  fail "Result is the 'dag synthesized' fallback template — LLM answer lost. Result: ${RESULT:0:200}"
+fi
+log "  Defensive assertions (not query echo, not fallback): PASSED"
 
 # ── Assert llm_calls >= 2 ───────────────────────────────────────
 LLM_CALLS=$(psql_cmd "SELECT count(*) FROM llm_calls WHERE task_id='$TASK_ID';" 2>/dev/null | tr -d ' ' || echo "0")

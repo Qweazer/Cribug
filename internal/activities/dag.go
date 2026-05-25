@@ -536,8 +536,8 @@ func (a *DAGActivities) Synthesis(ctx context.Context, input SynthesisInput) (*S
 		}
 		if result.Status == "completed" {
 			completedNodes++
-			// Include draft_answer output in final answer
-			if node.ID == "draft_answer" && result.Output != "" {
+			// Collect LLM node output for final answer (draft is the ReAct node, review is the final LLM node)
+			if result.Output != "" && (node.ID == "draft" || node.ID == "review") {
 				finalAnswerParts = append(finalAnswerParts, result.Output)
 			}
 		}
