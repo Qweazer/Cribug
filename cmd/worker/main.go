@@ -83,8 +83,18 @@ func main() {
 	w.RegisterActivityWithOptions(multiAgentActivities.RunCriticAgent, activity.RegisterOptions{Name: "RunCriticAgentActivity"})
 	w.RegisterActivityWithOptions(multiAgentActivities.RunSynthesizerAgent, activity.RegisterOptions{Name: "RunSynthesizerAgentActivity"})
 
-	// Phase 3D: ReAct Activity
+	// Phase 3D: ReAct Activity (deprecated - replaced by Workflow-level ReactLoop in Phase 4B)
+	// Kept for backward compatibility with existing tasks
 	w.RegisterActivityWithOptions(reactActivities.ExecuteReActNode, activity.RegisterOptions{Name: "ExecuteReActNodeActivity"})
+
+	// Phase 4B: ReAct Audit Activity (Workflow-level ReAct step audit to Postgres)
+	reactAuditActivities := activities.NewReActAuditActivities(dbClient.Stdlib())
+	w.RegisterActivityWithOptions(reactAuditActivities.SaveReActStepAudit, activity.RegisterOptions{Name: "SaveReActStepAuditActivity"})
+
+	// Ensure react_steps table exists
+	if err := activities.EnsureReActStepTable(dbClient.Stdlib()); err != nil {
+		log.Printf("[WARN] Failed to ensure react_steps table: %v", err)
+	}
 
 	// Phase 4A: DAG Visualization Activities
 	dagVisualActivities := activities.NewDAGVisualActivities(cfg.RedisAddr, cfg.RedisPass, cfg.RedisDB, cfg.DAGTTLSeconds)

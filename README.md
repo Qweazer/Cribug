@@ -379,13 +379,61 @@ Gateway cannot reach Temporal:
 2. Check RecordUsageActivity executed
 3. Check Postgres has data: `docker.exe exec deploy-postgres-1 psql ...`
 
-## Phase 3: DAG Concurrency + ReAct + tiktoken
+## Phase 4: DAG Visualization + Workflow-level ReAct
 
 | Slice | Status | Description |
 |-------|--------|-------------|
-| Slice 7 | ✅ | DAG Concurrency with LocalDispatchOptions + Redis state tracking |
-| Slice 8 | ✅ | ReAct Reasoning Loop with stepwise tool execution |
-| Slice 9 | Future | Real tiktoken Tokenizer |
+| Slice 10 | ✅ | DAG Visualization & ReAct Observability - Redis Hash node state, SSE events, GET /dag endpoint |
+| Slice 11 | ✅ | Workflow-level ReAct Loop - ReactLoop in Workflow layer, react_steps audit, Activity retry-safe history |
+| Slice 12 | Future | Two-Level LRU Cache |
+| Slice 13 | Future | DAG Dynamic Replanning |
+
+### Phase 4B Slice 11: Workflow-level ReAct
+
+Key changes:
+- **ReactLoop** moved from Activity (`ExecuteReActNodeActivity`) to Workflow layer (`internal/workflows/patterns/react.go`)
+- Each Reason / Act / Final Synthesis is a separate `AgentActivity` call
+- History passed through Activity parameters (`SessionMessages`) — survives Activity retries
+- `react_steps` Postgres table for audit-only logging (never used to reconstruct LLM context)
+- `SaveReActStepAudit` Activity with `INSERT ... ON CONFLICT DO NOTHING` for idempotency
+- `enable_react=true` in task config routes DAG nodes through Workflow-level ReactLoop
+- `enable_react=false` (default) preserves original DAG node execution
+- DAG visualization events (Slice 10) fully preserved
+
+Testing:
+```bash
+# Workflow-level ReAct test (mock)
+bash scripts/test_react_workflow_level.sh
+
+# Real LLM smoke test (optional, requires API key)
+REAL_LLM_TEST=1 bash scripts/test_react_real_llm_smoke.sh
+
+# Full Phase 4 smoke test
+bash scripts/smoke_test_phase4.sh
+```
+
+Real LLM smoke test:
+- Enabled only with `REAL_LLM_TEST=1` and a valid API key
+- Skips silently (exit 0) if conditions not met
+- Validates structure, not content: status=completed, result non-empty, llm_calls >= 2, total_tokens > 0
+- Verifies llm_calls.provider is not 'mock' and model contains expected value
+- Prints recent llm_calls rows on success for manual inspection
+- Uses `temperature=0.0` and small `max_completion_tokens` to control cost
+- Not included in default CI
+
+**Before running real LLM tests**, you MUST restart both services with real LLM credentials:
+```bash
+# 1. Restart Python LLM service with real API key (no --mock flag)
+cd python_llm_service
+OPENAI_API_KEY=sk-... python app.py
+
+# 2. Restart Worker (picks up the real LLM service)
+cd ..
+go run ./cmd/worker
+```
+The default Python LLM service uses deterministic mock responses. The smoke test
+validates that `llm_calls.provider` is not `"mock"`, so a mock service will cause
+a hard failure.
 
 ## What We DON'T Do (Yet)
 

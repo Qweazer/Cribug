@@ -5,6 +5,7 @@ import (
 	"cribug/internal/activities"
 	"cribug/internal/events"
 	"cribug/internal/types"
+	"cribug/internal/workflows/patterns"
 	"time"
 
 	"go.temporal.io/sdk/temporal"
@@ -260,17 +261,100 @@ Output your answer directly:`, req.Query, upstreamContext, node.Name, node.Type)
 
 			// Start node execution - use ReAct if enabled, otherwise use regular DAG node
 			if node.UseLLM && node.ReactConfig != nil && node.ReactConfig.EnableReAct {
-				// ReAct node: call ExecuteReActNodeActivity
-				layerFutures[node.ID] = workflow.ExecuteActivity(ctx, "ExecuteReActNodeActivity", activities.ExecuteReActNodeInput{
-					TaskID:      req.TaskID,
-					NodeID:      node.ID,
-					Prompt:      prompt,
-					Model:       req.Model,
-					Temperature: req.Temperature,
-					MaxTokens:   req.MaxCompletionTokens,
-					ReactConfig: *node.ReactConfig,
-					TTLSeconds:  86400,
-				})
+				// Workflow-level ReAct node: call ReactLoop (Workflow function, not Activity)
+				// Each Reason/Act/Synthesis step is a separate AgentActivity call
+				reactConfig := types.ReactConfig{
+					MaxIterations:     node.ReactConfig.MaxIterations,
+					MinIterations:     1,
+					ObservationWindow: 3,
+					MaxObservations:   10,
+					MaxThoughts:       10,
+					MaxActions:        10,
+				}
+				if reactConfig.MaxIterations <= 0 {
+					reactConfig.MaxIterations = 3
+				}
+
+				reactResult, reactErr := patterns.ReactLoop(
+					ctx,
+					prompt,
+					"",          // baseContext
+					req.SessionID,
+					req.TaskID,
+					req.WorkflowID,
+					req.RunID,
+					req.Model,
+					req.Temperature,
+					req.MaxCompletionTokens,
+					reactConfig,
+				)
+
+				nowNs := workflow.Now(ctx).UnixNano()
+				if reactErr != nil {
+					logger.Error("ReAct node execution failed", "node_id", node.ID, "error", reactErr)
+					nodeResults[node.ID] = types.DAGNodeResult{
+						TaskID:   req.TaskID,
+						NodeID:   node.ID,
+						NodeType: "llm",
+						Status:   "failed",
+						Error:    reactErr.Error(),
+					}
+					workflow.ExecuteActivity(ctx, "RecordDAGNodeStatus", activities.RecordDAGNodeStatusInput{
+						TaskID:        req.TaskID,
+						WorkflowID:    req.WorkflowID,
+						NodeID:        node.ID,
+						Status:        types.NodeStatusFailed,
+						Layer:         layerIdx,
+						CompletedAtNs: nowNs,
+						Error:         reactErr.Error(),
+					}).Get(ctx, nil)
+					workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+						TaskID: req.TaskID,
+						Event:  events.NewDAGNodeCompletedEvent(req.TaskID, node.ID, "llm", "failed", reactErr.Error()),
+					}).Get(ctx, nil)
+				} else {
+					nodeResults[node.ID] = types.DAGNodeResult{
+						TaskID:   req.TaskID,
+						NodeID:   node.ID,
+						NodeType: "llm",
+						Status:   "completed",
+						Output:   reactResult.FinalResult,
+					}
+					workflow.ExecuteActivity(ctx, "RecordDAGNodeStatus", activities.RecordDAGNodeStatusInput{
+						TaskID:        req.TaskID,
+						WorkflowID:    req.WorkflowID,
+						NodeID:        node.ID,
+						Status:        types.NodeStatusCompleted,
+						Layer:         layerIdx,
+						CompletedAtNs: nowNs,
+					}).Get(ctx, nil)
+					workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+						TaskID: req.TaskID,
+						Event:  events.NewDAGNodeCompletedEvent(req.TaskID, node.ID, "llm", "completed", reactResult.FinalResult),
+					}).Get(ctx, nil)
+					// Track ReAct usage for this node
+					if reactResult.TotalTokens > 0 {
+						llmNodes++
+						totalTokens += reactResult.TotalTokens
+						totalPromptTokens += reactResult.TotalTokens * 6 / 10
+						totalCompletionTokens += reactResult.TotalTokens - (reactResult.TotalTokens * 6 / 10)
+
+						workflow.ExecuteActivity(ctx, "RecordDAGNodeUsageActivity", activities.RecordDAGNodeUsageInput{
+							TaskID:           req.TaskID,
+							WorkflowID:       req.WorkflowID,
+							RunID:            req.RunID,
+							NodeID:           node.ID,
+							Model:            req.Model,
+							Provider:         "openai_compatible",
+							PromptTokens:     totalPromptTokens,
+							CompletionTokens: totalCompletionTokens,
+							TotalTokens:      reactResult.TotalTokens,
+							LatencyMS:        0,
+							FinishReason:     "stop",
+						}).Get(ctx, nil)
+					}
+				}
+				// ReAct nodes are handled synchronously (no Future in layerFutures)
 			} else {
 				// Regular node: call ExecuteDAGNodeActivity
 				layerFutures[node.ID] = workflow.ExecuteActivity(ctx, "ExecuteDAGNodeActivity", activities.ExecuteDAGNodeInput{

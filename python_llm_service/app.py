@@ -3,6 +3,9 @@ from pydantic import BaseModel
 from functools import lru_cache
 import tiktoken
 import time
+import os
+
+from adapters.openai import build_client, chat as real_chat
 
 # tiktoken encoding mappings
 MODEL_TO_ENCODING = {
@@ -22,6 +25,9 @@ def get_encoding(model: str):
     return tiktoken.get_encoding(encoding_name)
 
 app = FastAPI()
+
+# Build real LLM client from env vars (falls back to mock if no API key)
+_real_client = build_client()
 
 # Role-based system prompts (safe, non-sensitive content)
 ROLE_PROMPTS = {
@@ -85,7 +91,12 @@ class TokenizeRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "mode": "real" if _real_client is not None else "mock",
+        "provider": "openai_compatible",
+        "model": os.environ.get("LLM_MODEL", "gpt-4o-mini"),
+    }
 
 
 @app.post("/tokenize")
@@ -149,10 +160,48 @@ def chat(req: LLMRequest):
     if last_user_content is None:
         raise HTTPException(status_code=400, detail="no user message found")
 
-    # Use mock content (role-based) but can incorporate user content
+    # ── Real LLM path ──────────────────────────────────────────────
+    if _real_client is not None:
+        try:
+            messages = []
+            for msg in req.messages:
+                # Normalize system/user/assistant roles; skip unsupported roles
+                role = msg.role
+                if role not in ("system", "user", "assistant"):
+                    role = "user"
+                messages.append({"role": role, "content": msg.content})
+
+            result = real_chat(
+                client=_real_client,
+                model=req.model,
+                messages=messages,
+                temperature=req.temperature,
+                max_completion_tokens=req.max_completion_tokens,
+            )
+
+            usage = result["usage"]
+            return LLMResponse(
+                content=result["content"],
+                usage=Usage(
+                    prompt_tokens=usage["prompt_tokens"],
+                    completion_tokens=usage["completion_tokens"],
+                    total_tokens=usage["total_tokens"],
+                ),
+                model=result["model"],
+                provider=req.provider,
+                finish_reason=result["finish_reason"],
+                provider_response_id=result.get("provider_response_id"),
+                latency_ms=result["latency_ms"],
+                error=None,
+            )
+        except Exception as e:
+            # Real LLM failed — fall back to mock with error logged
+            print(f"[WARN] Real LLM call failed, falling back to mock: {e}")
+            # Fall through to mock path below
+
+    # ── Mock path (fallback) ──────────────────────────────────────
     content = mock_content
 
-    # Calculate tokens based on content length
     prompt_text = f"{system_prompt} {last_user_content}"
     prompt_tokens = max(1, len(prompt_text) // 4)
     completion_tokens = max(1, len(content) // 4)
@@ -171,5 +220,5 @@ def chat(req: LLMRequest):
         finish_reason="stop",
         provider_response_id=f"mock-{req.task_id}",
         latency_ms=latency_ms,
-        error=None
+        error=None,
     )
