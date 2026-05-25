@@ -96,7 +96,7 @@ log "Creating ReAct task with real LLM..."
 PAYLOAD=$(jq -n \
   --arg model "$REAL_LLM_MODEL" \
   '{
-    query: "What is the capital of France? Answer in one sentence.",
+    query: "who is Gnabry? Answer in one sentence.",
     config: {
       mode: "dag",
       enable_react: true,
@@ -135,13 +135,13 @@ RESULT=$(curl --noproxy '*' -s "$GATEWAY_URL/api/v1/tasks/$TASK_ID" | jq -r '.re
 if [ -z "$RESULT" ]; then
   fail "Result is empty"
 fi
-log "  Result non-empty: PASSED (preview: ${RESULT:0:120}...)"
+log "  Result non-empty: PASSED (len=${#RESULT})"
 
 # ── Weak semantic assertion: must contain Paris or 巴黎 ──────────
 if echo "$RESULT" | grep -Eiq "Paris|巴黎"; then
   log "  Result contains Paris/巴黎: PASSED"
 else
-  fail "Result does not contain Paris or 巴黎 — LLM answer not propagated. Result preview: ${RESULT:0:200}"
+  fail "Result does not contain Paris or 巴黎 — LLM answer not propagated"
 fi
 
 # ── Defensive: result must NOT be the original query ─────────────
@@ -152,7 +152,7 @@ fi
 
 # ── Defensive: result must NOT be the "dag synthesized" fallback ─
 if echo "$RESULT" | grep -qi "dag synthesized"; then
-  fail "Result is the 'dag synthesized' fallback template — LLM answer lost. Result: ${RESULT:0:200}"
+  fail "Result is the 'dag synthesized' fallback template — LLM answer lost"
 fi
 log "  Defensive assertions (not query echo, not fallback): PASSED"
 

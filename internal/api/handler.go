@@ -276,6 +276,54 @@ func (h *Handler) getTask(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, resp)
 }
 
+func (h *Handler) getDAG(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "id")
+	if taskID == "" {
+		WriteError(w, http.StatusBadRequest, "task id is required", types.ErrorTypeValidation)
+		return
+	}
+
+	ctx := r.Context()
+
+	// Get workflow ID from Redis task status
+	taskStatus, _ := h.redis.GetTaskStatus(ctx, taskID)
+	workflowID := ""
+	if taskStatus != nil {
+		workflowID = taskStatus.WorkflowID
+	}
+	if workflowID == "" {
+		workflowID = "task-" + taskID
+	}
+
+	// Read DAG node statuses from Redis
+	// Keys follow pattern: dag:{workflow_id}:nodes:status or dag:{task_id}:nodes:status
+	statusKey := "dag:" + workflowID + ":nodes:status"
+	nodes, _ := h.redis.HGetAll(ctx, statusKey)
+	if len(nodes) == 0 {
+		statusKey = "dag:" + taskID + ":nodes:status"
+		nodes, _ = h.redis.HGetAll(ctx, statusKey)
+	}
+
+	// Read DAG meta
+	metaKey := "dag:" + workflowID + ":meta"
+	meta, _ := h.redis.HGetAll(ctx, metaKey)
+
+	// Read node details (dependencies, layer etc.)
+	nodesDetailKey := "dag:" + workflowID + ":nodes"
+	nodesDetail, _ := h.redis.HGetAll(ctx, nodesDetailKey)
+
+	// Build response
+	dagResponse := map[string]interface{}{
+		"task_id":     taskID,
+		"workflow_id": workflowID,
+		"meta":         meta,
+		"nodes_status": nodes,
+		"nodes_detail": nodesDetail,
+	}
+
+	WriteJSON(w, http.StatusOK, dagResponse)
+}
+
 func (h *Handler) toTaskDetailResponse(task *types.Task) *types.TaskDetailResponse {
 	resp := &types.TaskDetailResponse{
 		TaskID:              task.ID,

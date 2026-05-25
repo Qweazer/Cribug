@@ -136,6 +136,14 @@ func (c *Client) AppendTaskEvent(ctx context.Context, taskID string, event event
 	c.client.Expire(ctx, key, 24*time.Hour)
 }
 
+func (c *Client) HGetAll(ctx context.Context, key string) (map[string]string, error) {
+	return c.client.HGetAll(ctx, key).Result()
+}
+
+func (c *Client) Keys(ctx context.Context, pattern string) ([]string, error) {
+	return c.client.Keys(ctx, pattern).Result()
+}
+
 func parseInt(s string) int {
 	i, _ := strconv.Atoi(s)
 	return i

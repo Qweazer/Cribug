@@ -389,8 +389,8 @@ Output your answer directly:`, req.Query, upstreamContext, node.Name, node.Type)
 			} else {
 				nodeResults[nodeID] = *dagOutput.Result
 
-				// If LLM node, record usage and emit LLM_COMPLETED
-				if dagOutput.Result.NodeType == "llm" && dagOutput.Usage != nil {
+				// If node has LLM usage, record it (node types are "analysis"/"synthesis"/"review", not "llm")
+				if dagOutput.Usage != nil && dagOutput.Usage.TotalTokens > 0 {
 					llmNodes++
 					totalTokens += dagOutput.Usage.TotalTokens
 					totalPromptTokens += dagOutput.Usage.PromptTokens
