@@ -75,26 +75,18 @@ test_dag_visual() {
   # ===== Phase 4.1: Verify dependencies field =====
   log "Verifying dependencies field in nodes..."
 
-  # Check draft_answer node has dependencies
-  local draft_answer_json=$(docker exec $REDIS_CONTAINER redis-cli HGET "$nodes_key" "draft_answer" 2>/dev/null | tr -d '\r\n')
-  [[ -n "$draft_answer_json" ]] || fail "draft_answer node not found in Redis"
+  # Check draft node has dependencies (compare, validate)
+  local draft_json=$(docker exec $REDIS_CONTAINER redis-cli HGET "$nodes_key" "draft" 2>/dev/null | tr -d '\r\n')
+  [[ -n "$draft_json" ]] || fail "draft node not found in Redis"
+  log "draft JSON: $draft_json"
+  echo "$draft_json" | grep -q "dependencies" || fail "draft missing 'dependencies' field"
+  echo "$draft_json" | grep -q "compare" || fail "draft.dependencies does not contain compare"
 
-  log "draft_answer JSON: $draft_answer_json"
-
-  # Verify dependencies field exists
-  echo "$draft_answer_json" | grep -q "dependencies" || fail "draft_answer missing 'dependencies' field"
-
-  # Verify draft_answer depends on analyze_input
-  echo "$draft_answer_json" | grep -q "analyze_input" || fail "draft_answer.dependencies does not contain analyze_input"
-
-  # Check analyze_input node
-  local analyze_input_json=$(docker exec $REDIS_CONTAINER redis-cli HGET "$nodes_key" "analyze_input" 2>/dev/null | tr -d '\r\n')
-  [[ -n "$analyze_input_json" ]] || fail "analyze_input node not found in Redis"
-
-  log "analyze_input JSON: $analyze_input_json"
-
-  # Verify analyze_input has dependencies field (empty array is ok)
-  echo "$analyze_input_json" | grep -q "dependencies" || fail "analyze_input missing 'dependencies' field"
+  # Check research node (root node, no dependencies)
+  local research_json=$(docker exec $REDIS_CONTAINER redis-cli HGET "$nodes_key" "research" 2>/dev/null | tr -d '\r\n')
+  [[ -n "$research_json" ]] || fail "research node not found in Redis"
+  log "research JSON: $research_json"
+  echo "$research_json" | grep -q "dependencies" || fail "research missing 'dependencies' field"
 
   pass "DAG dependencies verification passed"
   pass "DAG Visualization test passed"
