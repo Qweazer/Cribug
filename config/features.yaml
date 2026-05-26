@@ -25,6 +25,14 @@ features:
   dag_failure_policy: skip_dependents
   dag_replan_emit_summary: true
 
+  # Phase 4E Slice 14: DAG Concurrency Control
+  max_parallel_agents: 5
+  max_parallel_agents_hard_limit: 20
+  dag_node_schedule_to_start_timeout_seconds: 10
+  dag_node_start_to_close_timeout_seconds: 90
+  dag_node_retry_max_attempts: 3
+  enable_dag_latency_test_hooks: false
+
   # Phase 4C Slice 12: Two-level token LRU cache
   enable_token_lru_cache: true
   l1_cache_ttl_seconds: 300

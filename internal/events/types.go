@@ -39,6 +39,9 @@ const (
 	// DAG Dynamic Replanning events (Slice 13)
 	EventTypeDAGNodeSkipped        = "DAG_NODE_SKIPPED"
 	EventTypeDAGReplanSummary      = "DAG_REPLAN_SUMMARY"
+	// DAG Concurrency Control (Slice 14)
+	EventTypeDAGConcurrencyLimitApplied = "DAG_CONCURRENCY_LIMIT_APPLIED"
+	EventTypeDAGNodeRetrying            = "DAG_NODE_RETRYING"
 )
 
 type AgentEvent struct {
@@ -391,6 +394,30 @@ func NewDAGReplanSummaryEvent(taskID, workflowID, failedNodeID string, skippedNo
 		"remaining_executable": remainingCount,
 		"replan_applied":      true,
 		"timestamp":           time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// NewDAGConcurrencyLimitAppliedEvent (Slice 14)
+func NewDAGConcurrencyLimitAppliedEvent(taskID, workflowID string, maxParallel, active, peak int) AgentEvent {
+	return NewAgentEvent(EventTypeDAGConcurrencyLimitApplied, map[string]interface{}{
+		"task_id":              taskID,
+		"workflow_id":          workflowID,
+		"max_parallel_agents":  maxParallel,
+		"active_nodes":         active,
+		"peak_parallel_nodes":  peak,
+		"timestamp":            time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// NewDAGNodeRetryingEvent (Slice 14)
+func NewDAGNodeRetryingEvent(taskID, workflowID, nodeID string, attempt int32, errorMsg string) AgentEvent {
+	return NewAgentEvent(EventTypeDAGNodeRetrying, map[string]interface{}{
+		"task_id":     taskID,
+		"workflow_id": workflowID,
+		"node_id":     nodeID,
+		"attempt":     attempt,
+		"error":       errorMsg,
+		"timestamp":   time.Now().UTC().Format(time.RFC3339),
 	})
 }
 

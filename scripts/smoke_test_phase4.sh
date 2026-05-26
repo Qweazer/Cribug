@@ -77,7 +77,17 @@ else
   log "WARNING: test_dag_dynamic_replan.sh not found, skipping"
 fi
 
-# Multi-agent lite full (regression)
+# Slice 14: DAG Concurrency Control
+log ""
+log "--- Slice 14: DAG Concurrency Control ---"
+if [ -f "$SCRIPT_DIR/test_dag_concurrency_control.sh" ]; then
+  bash "$SCRIPT_DIR/test_dag_concurrency_control.sh" || fail "test_dag_concurrency_control.sh failed"
+  log "Slice 14 DAG concurrency: PASSED"
+else
+  log "WARNING: test_dag_concurrency_control.sh not found, skipping"
+fi
+
+
 log ""
 log "--- Multi-Agent Lite Full (regression) ---"
 if [ -f "$SCRIPT_DIR/test_multi_agent_lite_full.sh" ]; then

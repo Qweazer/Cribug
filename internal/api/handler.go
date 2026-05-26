@@ -102,7 +102,9 @@ func (h *Handler) createTask(w http.ResponseWriter, r *http.Request) {
 		MaxParallelAgents:   maxParallelAgents,
 		EnableReAct:         enableReAct,
 		ReActMaxIterations:  reactMaxIterations,
-			TestFailNodeID:      getTestFailNodeID(req.Config),
+			TestFailNodeID:       getTestFailNodeID(req.Config),
+			TestDAGNodeDelayMs:   getIntField(req.Config, "delay_ms"),
+			TestDAGNodeFailAttempts: getIntField(req.Config, "fail_attempts"),
 	}
 
 	if h.temporal == nil {
@@ -226,6 +228,43 @@ func (h *Handler) extractConcurrencyConfig(cfg *types.TaskConfig) (maxParallelAg
 	}
 
 	return
+}
+
+func getMaxParallelAgents(cfg *types.TaskConfig, defaultVal int) int {
+	if cfg != nil && cfg.MaxParallelAgents != nil {
+		v := *cfg.MaxParallelAgents
+		if v <= 0 {
+			if defaultVal <= 0 {
+				defaultVal = 5
+			}
+			return defaultVal
+		}
+		if v > 20 {
+			return 20 // hard limit
+		}
+		return v
+	}
+	if defaultVal <= 0 {
+		return 5
+	}
+	return defaultVal
+}
+
+func getIntField(cfg *types.TaskConfig, field string) int {
+	if cfg == nil {
+		return 0
+	}
+	switch field {
+	case "delay_ms":
+		if cfg.TestDAGNodeDelayMs != nil {
+			return *cfg.TestDAGNodeDelayMs
+		}
+	case "fail_attempts":
+		if cfg.TestDAGNodeFailAttempts != nil {
+			return *cfg.TestDAGNodeFailAttempts
+		}
+	}
+	return 0
 }
 
 func getTestFailNodeID(cfg *types.TaskConfig) string {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"cribug/internal/llm"
 	"cribug/internal/types"
@@ -205,7 +206,9 @@ type ExecuteDAGNodeInput struct {
 	Model           string
 	Temperature     float64
 	MaxTokens       int
-	TestFailNodeID  string // Slice 13 test hook: if matches Node.ID, return deterministic error
+	TestFailNodeID          string // Slice 13: fail this node
+	TestNodeDelayMs          int    // Slice 14: delay execution by N ms
+	TestNodeFailAttempts     int    // Slice 14: fail first N attempts, succeed on N+1
 }
 
 type ExecuteDAGNodeOutput struct {
@@ -221,10 +224,25 @@ func (a *DAGActivities) ExecuteDAGNode(ctx context.Context, input ExecuteDAGNode
 		"node_type", input.Node.Type,
 		"use_llm", input.Node.UseLLM)
 
-	// Slice 13 test hook: deterministic failure injection for DAG replan testing
+	// Slice 13/14 test hooks
 	if input.TestFailNodeID != "" && input.Node.ID == input.TestFailNodeID {
-		logger.Warn("ExecuteDAGNodeActivity: test fail node triggered", "node_id", input.Node.ID)
-		return nil, fmt.Errorf("test failure injection: node '%s' failed by test hook", input.Node.ID)
+		// Slice 14: transient failure — fail first N attempts, succeed on N+1
+		if input.TestNodeFailAttempts > 0 {
+			attempt := activity.GetInfo(ctx).Attempt
+			if attempt <= int32(input.TestNodeFailAttempts) {
+				logger.Warn("ExecuteDAGNodeActivity: transient failure", "node_id", input.Node.ID, "attempt", attempt)
+				return nil, fmt.Errorf("test transient failure: node '%s' attempt %d/%d", input.Node.ID, attempt, input.TestNodeFailAttempts)
+			}
+			logger.Info("ExecuteDAGNodeActivity: transient failure cleared", "node_id", input.Node.ID, "attempt", attempt)
+		} else {
+			logger.Warn("ExecuteDAGNodeActivity: test fail node triggered", "node_id", input.Node.ID)
+			return nil, fmt.Errorf("test failure injection: node '%s' failed by test hook", input.Node.ID)
+		}
+	}
+	// Slice 14: deterministic delay hook
+	if input.TestNodeDelayMs > 0 {
+		logger.Info("ExecuteDAGNodeActivity: test delay", "node_id", input.Node.ID, "delay_ms", input.TestNodeDelayMs)
+		time.Sleep(time.Duration(input.TestNodeDelayMs) * time.Millisecond)
 	}
 
 	// Update Redis status to "running"

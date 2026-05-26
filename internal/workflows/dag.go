@@ -172,10 +172,14 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 	// 并发度由 req.MaxParallelAgents 控制，每层节点会并发执行
 
 	// Determine concurrency level from request (for logging)
-	maxParallel := 1
-	if req.MaxParallelAgents > 0 {
-		maxParallel = req.MaxParallelAgents
+	maxParallel := req.MaxParallelAgents
+	if maxParallel <= 0 {
+		maxParallel = 5
 	}
+	if maxParallel > 20 {
+		maxParallel = 20
+	}
+	var peakParallel int
 
 	logger.Info("Starting concurrent node execution", "max_parallel", maxParallel)
 
@@ -189,6 +193,11 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 		layerFutures := make(map[string]workflow.Future)
 
 		logger.Info("Executing DAG node layer", "layer_size", len(layer))
+			if len(layer) > peakParallel { peakParallel = len(layer) }
+			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+				TaskID: req.TaskID,
+				Event: events.NewDAGConcurrencyLimitAppliedEvent(req.TaskID, req.WorkflowID, maxParallel, len(layer), peakParallel),
+			}).Get(ctx, nil)
 
 		// Start all nodes in this layer concurrently
 		for _, node := range layer {

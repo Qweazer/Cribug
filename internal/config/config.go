@@ -47,7 +47,7 @@ func Load() *Config {
 		// DAG Concurrency (Slice 7)
 		EnableDAGConcurrency: getEnvAsBool("ENABLE_DAG_CONCURRENCY", false),
 		DAGTTLSeconds:        getEnvAsInt("DAG_TTL_SECONDS", 86400),
-		MaxParallelAgents:    getEnvAsInt("MAX_PARALLEL_AGENTS", 1),
+		MaxParallelAgents:    getEnvAsInt("MAX_PARALLEL_AGENTS", 5),
 
 		// ReAct Reasoning Loop (Slice 8)
 		EnableReAct:          getEnvAsBool("ENABLE_REACT", false),

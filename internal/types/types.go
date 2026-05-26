@@ -35,7 +35,9 @@ type TaskConfig struct {
 	MaxParallelAgents   *int     `json:"max_parallel_agents,omitempty"`
 	EnableReAct         *bool    `json:"enable_react,omitempty"`
 	ReActMaxIterations  *int     `json:"react_max_iterations,omitempty"`
-	TestFailNodeID      *string  `json:"test_fail_node_id,omitempty"` // Slice 13 test hook: returns deterministic error for this node
+	TestFailNodeID      *string  `json:"test_fail_node_id,omitempty"` // Slice 13/14 test hook
+	TestDAGNodeDelayMs  *int     `json:"test_dag_node_delay_ms,omitempty"` // Slice 14: delay hook
+	TestDAGNodeFailAttempts *int `json:"test_dag_node_fail_attempts,omitempty"` // Slice 14: transient failure hook
 }
 
 const (
@@ -156,8 +158,10 @@ type WorkflowTaskRequest struct {
 	EnableReAct        bool `json:"enable_react,omitempty"`
 	ReActMaxIterations int  `json:"react_max_iterations,omitempty"`
 
-	// Test hook for Slice 13 DAG dynamic replan testing
-	TestFailNodeID string `json:"test_fail_node_id,omitempty"`
+	// Test hooks
+	TestFailNodeID          string `json:"test_fail_node_id,omitempty"`
+	TestDAGNodeDelayMs      int    `json:"test_dag_node_delay_ms,omitempty"`
+	TestDAGNodeFailAttempts int    `json:"test_dag_node_fail_attempts,omitempty"`
 
 	// ReactConfig is computed from EnableReAct + ReActMaxIterations
 	ReactConfig *ReactLoopConfig `json:"-"`
