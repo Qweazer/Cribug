@@ -5,7 +5,7 @@
 本文档为 Phase 4 **重构版**（v2.0），基于 Shannon 原生架构范式修复了以下核心缺陷：
 
 - **4B 修复**：ReAct Loop 保持在 Workflow 内（非 Activity 内），Activity 重试不丢 LLM 上下文
-- **4C 修复**：采用两级缓存（LocalLRU + Redis Hash），严禁进程内单实例缓存
+- **4C 修复**：采用两级缓存（LocalLRU + Redis String/KV），严禁进程内单实例缓存
 - **明确约束**：所有 Redis/DB 时间戳必须通过 `workflow.Now(ctx)` 传入
 
 ---
@@ -24,14 +24,14 @@
 
 ### 1.2 Phase 4 重构目标
 
-| Slice | 功能 | 描述 |
-|-------|------|------|
-| Phase 4A Slice 10 | DAG 可视化 | 节点状态动态展示、并发进度、依赖关系可交互查看 |
-| Phase 4B Slice 11 | **ReAct 暂停/恢复（重构）** | steps 存 Postgres 用于审计；LLM 对话历史通过 Workflow 参数传递，Activity 重试不丢上下文 |
-| Phase 4C Slice 12 | **分布式 LRU 缓存（重构）** | 两级缓存：L1 LocalLRU + L2 Redis Hash with TTL + `maxmemory-policy allkeys-lru` |
-| Phase 4D Slice 13 | DAG 动态重规划 | 节点失败回退、动态重规划、Resource/Concurrency 限制 |
-| Phase 4E Slice 14 | 并发控制增强 | max_parallel_agents 可配置、节点离线容错、网络延迟处理 |
-| Phase 4F Slice 15 | 边界测试与验收 | 可执行 Smoke Test、缓存命中率验证、异常恢复验证 |
+| Slice | 功能 | 描述 | 真实 LLM 引入 |
+|-------|------|------|---------------|
+| Phase 4A Slice 10 | DAG 可视化 | 节点状态动态展示、并发进度、依赖关系可交互查看 | 不需要 |
+| Phase 4B Slice 11 | **ReAct 暂停/恢复（重构）** + Real LLM Smoke 起点 | steps 存 Postgres 用于审计；LLM 对话历史通过 Workflow 参数传递，Activity 重试不丢上下文；**Slice 11 完成后新增可选真实 LLM ReAct smoke test** | 开始引入最小 smoke |
+| Phase 4C Slice 12 | **分布式 LRU 缓存（重构）** | 两级缓存：L1 LocalLRU + L2 Redis String/KV with TTL + `maxmemory-policy allkeys-lru` | 可选 |
+| Phase 4D Slice 13 | DAG 动态重规划 | 节点失败回退、动态重规划、Resource/Concurrency 限制 | 可选 |
+| Phase 4E Slice 14 | 并发控制增强 | max_parallel_agents 可配置、节点离线容错、网络延迟处理 | 可选 |
+| Phase 4F Slice 15 | 边界测试与验收 + Real LLM E2E Smoke | 可执行 Smoke Test、缓存命中率验证、异常恢复验证；**新增真实 LLM E2E smoke test 作为阶段验收项；真实 LLM 测试不进入默认 CI；无 API key 时自动 skip** | 必须有可选 E2E smoke |
 
 ---
 
@@ -61,8 +61,9 @@
 ### 2.3 Phase 4 新增约束
 
 **DAG 可视化约束：**
-- DAG 节点状态通过 `EmitTaskUpdate` Activity 推送 SSE 事件
-- 可视化数据存储在 Redis Hash（`dag:{workflow_id}:nodes`）
+- DAG 节点状态更新在 DAGNodeActivity 内完成，写入 Redis Hash
+- DAG node 事件（running/completed/failed）通过 `a.streamPublisher.Publish()` helper 推送 SSE/Stream 事件
+- Activity 内不能调用 `workflow.ExecuteActivity`
 - Gateway 订阅 SSE 事件流并在 Dashboard 展示
 
 **ReAct 暂停/恢复约束（关键重构）：**
@@ -74,7 +75,7 @@
 
 **分布式 LRU 约束（关键重构）：**
 - L1 缓存：`LocalLRU`（进程内），TTL 短（5 分钟）
-- L2 缓存：`Redis Hash`（跨 Worker 共享），TTL 长（1 小时）
+- L2 缓存：`Redis String/KV`（跨 Worker 共享），TTL 长（1 小时）
 - Redis LRU 驱逐策略：`maxmemory-policy allkeys-lru`
 - **严禁使用 `go-cache` 等纯进程内缓存**
 
@@ -84,6 +85,70 @@
 - ❌ 不使用 `time.Now()` 在 Workflow 内（使用 `workflow.Now(ctx)`）
 - ❌ 不在 Activity 内循环中丢失 LLM 对话上下文
 - ❌ 不使用进程内单实例缓存（go-cache）
+
+---
+
+## 真实 LLM 测试引入策略
+
+### 引入原则
+
+Phase 4 仍以 mock / fixture / deterministic 测试作为默认回归基线，但从 Phase 4B 之后开始引入真实 LLM smoke test。
+
+真实 LLM 测试只用于验证端到端模型链路，不替代现有 mock 测试。
+
+### 引入时机
+
+| 阶段 | 是否使用真实 LLM | 原因 |
+|------|------------------|------|
+| Phase 4A Slice 10 DAG 可视化 | 否 | 该阶段验证 DAG 状态、Redis snapshot、SSE、Dashboard graph，不依赖模型行为 |
+| Phase 4B Slice 11 ReAct 暂停/恢复 | 是，开始引入最小 smoke | 需要验证真实 LLM 输出是否能被 ReAct parser 解析，history 是否保持 |
+| Phase 4C Slice 12 两级 LRU | 可选 | 主要验证 token 估算与缓存，可继续以 mock/tokenizer fixture 为主 |
+| Phase 4D Slice 13 DAG 动态重规划 | 可选 | 主要验证失败回退和状态流转，真实 LLM 不是必需 |
+| Phase 4E Slice 14 并发控制增强 | 可选 | 主要验证并发限制和容错，真实 LLM 仅用于手动压力 smoke |
+| Phase 4F Slice 15 边界测试与验收 | 必须有可选真实 LLM E2E smoke | Phase 4 出口必须证明真实模型链路可跑通 |
+
+### 真实 LLM 测试分层
+
+#### 1. Mock Regression Test
+
+- **默认执行**
+- 不需要 API key
+- 用于 CI / 本地快速回归
+- 断言工程结构、Redis、SSE、DAG、ReAct、budget、llm_calls
+
+#### 2. Real LLM Smoke Test
+
+- **手动开启**
+- 需要 `REAL_LLM_TEST=1`
+- 需要 `OPENAI_API_KEY` 或兼容 Provider API key
+- 用于验证真实 LLM 调用链路
+- **不进入默认 CI**
+
+#### 3. Real LLM E2E Test
+
+- Phase 4F 作为阶段验收项
+- 验证 `Gateway -> Workflow -> Activity -> Python LLM Service -> Provider -> llm_calls -> token usage -> result` 全链路
+- 不能断言完整自然语言文本，只能断言结构、状态、token、Redis、llm_calls、workflow result
+
+### 真实 LLM 测试默认行为
+
+| 场景 | 行为 |
+|------|------|
+| `REAL_LLM_TEST=0`（默认） | 只跑 mock 测试，不请求真实 LLM |
+| `REAL_LLM_TEST=1` + 无 API key | skip 真实 LLM 测试，不 fail |
+| `REAL_LLM_TEST=1` + 有 API key | 执行真实 LLM smoke test |
+| API key 缺失 | `t.Skip("OPENAI_API_KEY not set")`，不 fail |
+
+### 真实 LLM 测试验收条件
+
+1. **Phase 4B Slice 11 完成后**：可选真实 LLM ReAct smoke test 必须能跑通
+   - 验证 ReAct parser 能解析真实 LLM 输出格式
+   - 验证 history 在 Activity retry 后仍然保持
+   - 验证 token usage 被正确记录
+
+2. **Phase 4F Slice 15 验收时**：真实 LLM E2E smoke test 必须可选跑通
+   - 不阻塞 release，但作为验收项必须记录结果
+   - 如果 API key 缺失，标记为 skip 并记录
 
 ---
 
@@ -115,10 +180,30 @@ TTL: 86400 秒（1 天）
 Key: dag:{workflow_id}:nodes
 Type: Hash
 Fields:
-  - node_id -> NodeStatus JSON
-  - node_id -> NodeConfig JSON
-  - node_id -> NodeResult JSON（完成后写入）
+  - node_id -> NodeState JSON（完整节点状态，包含 dependencies、layer、started_at_ns 等所有字段）
 TTL: 86400 秒（1 天）
+
+**重要：每个 node_id 对应一个完整 NodeState JSON，不能按字段拆分存储。**
+
+NodeState JSON 结构（必须包含以下所有字段）：
+```json
+{
+  "node_id": "draft_answer",
+  "status": "completed",
+  "layer": 1,
+  "dependencies": ["analyze_input"],
+  "dependents": [],
+  "started_at_ns": 123,
+  "completed_at_ns": 456,
+  "worker_id": "worker-1",
+  "retry_count": 0,
+  "progress": 1.0,
+  "result": {...},
+  "error": null
+}
+```
+
+**状态更新必须 merge 旧 JSON，不能覆盖丢失 dependencies、layer、started_at_ns 等字段。**
 ```
 
 **NodeStatus 枚举：**
@@ -134,43 +219,18 @@ const (
 )
 ```
 
-**NodeStatus JSON 结构：**
-```json
-{
-  "node_id": "node-1",
-  "status": "running",
-  "started_at": 1747728000000000000,
-  "completed_at": null,
-  "worker_id": "worker-abc123",
-  "retry_count": 0,
-  "error": null,
-  "progress": 0.5,
-  "dependencies": ["node-0"],
-  "dependents": ["node-2", "node-3"]
-}
-```
+**时间戳规则（统一约束）：**
+- Workflow 相关业务时间戳（node started_at、completed_at、updated_at）**必须由 Workflow 使用 `workflow.Now(ctx)` 生成并传入 Activity**
+- Activity 内的 `time.Now()` 只允许用于本地 debug 日志或 wall-clock metrics，**不得写入 Redis/DB 作为业务状态时间**
+- DAGNodeActivity 示例中使用 `in.StartedAt` / `in.CompletedAt` / `in.UpdatedAt`（由 Workflow 传入），禁止在 Activity 内自行调用 `time.Now()` 生成业务时间戳
 
-#### 3.3 DAG 可视化 API
-
-**EmitTaskUpdate（推送状态到 SSE）：**
-```go
-type EmitTaskUpdateInput struct {
-    WorkflowID string                 `json:"workflow_id"`
-    RunID      string                 `json:"run_id"`
-    EventType  string                 `json:"event_type"` // "dag_node_pending" | "dag_node_running" | "dag_node_completed" | "dag_node_failed"
-    AgentID    string                 `json:"agent_id"`
-    Message    string                `json:"message"`
-    Timestamp  time.Time              `json:"timestamp"` // 必须来自 workflow.Now(ctx)
-    Metadata   map[string]interface{} `json:"metadata"`  // node_id, status, progress, etc.
-}
-```
-
-#### 3.4 DAG 可视化实现
+#### 3.3 DAG 可视化实现
 
 **DAGNodeActivity（Activity 实现）：**
 ```go
 // DAGNodeActivity - 节点执行与状态更新
 // 遵循 Shannon 范式：所有 Redis 操作在 Activity 内完成
+// ⚠️ 关键约束：Activity 内不能调用 workflow.* API，只能使用普通 context.Context
 func (a *Activities) DAGNodeActivity(ctx context.Context, in DAGNodeInput) (DAGNodeResult, error) {
     rc := a.sessionManager.RedisWrapper().GetClient()
     workflowID := in.WorkflowID
@@ -178,100 +238,128 @@ func (a *Activities) DAGNodeActivity(ctx context.Context, in DAGNodeInput) (DAGN
     nodeKey := fmt.Sprintf("dag:%s:nodes", workflowID)
 
     // ============================================================
-    // 1. 更新节点状态为 running（Redis Hash）
-    // 时间戳必须由调用方从 workflow.Now(ctx) 传入，禁止在 Activity 内使用 time.Now()
+    // 1. 读取旧状态（用于 merge）
     // ============================================================
-    startedAt := in.Timestamp
-    if startedAt.IsZero() {
-        startedAt = time.Now() // 仅作为兜底，不应在生产环境触发
+    oldJSON, err := rc.HGet(ctx, nodeKey, nodeID).Result()
+    var oldState NodeState
+    if err == nil {
+        json.Unmarshal([]byte(oldJSON), &oldState)
     }
-    statusJSON, _ := json.Marshal(NodeStatusInfo{
-        NodeID:     nodeID,
-        Status:     NodeStatusRunning,
-        StartedAt:  startedAt.UnixNano(),
-        WorkerID:   in.WorkerID,
-        RetryCount: in.RetryCount,
-    })
+
+    // ============================================================
+    // 2. 更新节点状态为 running（Redis Hash）
+    // ⚠️ 时间戳必须由 Workflow 传入 in.StartedAt，Activity 内不得自行使用 time.Now() 生成业务时间戳
+    // ⚠️ 必须 merge 旧状态，不能覆盖丢失 dependencies、layer、started_at_ns 等字段
+    // ============================================================
+    if in.StartedAt.IsZero() {
+        return DAGNodeResult{}, fmt.Errorf("started_at is required; must be provided by workflow.Now(ctx)")
+    }
+
+    // 从旧状态 merge 所有字段（一次构造完整 NodeState）
+    newState := oldState // 先完整继承旧状态
+    newState.Status = NodeStatusRunning
+    newState.StartedAt = in.StartedAt.UnixNano()
+    newState.WorkerID = in.WorkerID
+    newState.RetryCount = in.RetryCount
+    newState.Progress = 0.0
+    // Layer、Dependencies、Dependents 等字段保留自 oldState，不覆盖
+
+    statusJSON, _ := json.Marshal(newState)
     rc.HSet(ctx, nodeKey, nodeID, string(statusJSON))
 
     // ============================================================
-    // 2. 推送 SSE 事件（running）
-    // Activity 内部可以调用其他 Activity（fire-and-forget）
+    // 3. 推送 SSE 事件（running）
+    // ⚠️ Activity 内通过普通 streamPublisher helper 发布 SSE/Stream 事件
+    // ⚠️ Activity 内不能调用 workflow.ExecuteActivity（workflow.* API 只能在 Workflow 内使用）
     // ============================================================
-    emitCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-        StartToCloseTimeout: 5 * time.Second,
-        RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
-    })
-    _ = workflow.ExecuteActivity(emitCtx, "EmitTaskUpdate", EmitTaskUpdateInput{
+    a.streamPublisher.Publish(ctx, StreamEvent{
         WorkflowID: workflowID,
         EventType:  StreamEventDAGNodeRunning,
         AgentID:    "dag",
         Message:    fmt.Sprintf("node=%s running", nodeID),
-        Timestamp:  startedAt, // 使用传入的时间戳
+        Timestamp: in.StartedAt,
         Metadata: map[string]interface{}{
             "node_id":    nodeID,
             "worker_id":  in.WorkerID,
             "retry_count": in.RetryCount,
         },
-    }).Get(ctx, nil)
+    })
 
     // ============================================================
-    // 3. 执行业务逻辑（调用 ReAct 或简单执行）
+    // 4. 执行业务逻辑（调用 ReAct 或简单执行）
     // 注意：ReAct Loop 在 Workflow 内实现，不在 Activity 内循环
     // ============================================================
     result, err := a.executeNodeBusinessLogic(ctx, in)
 
     // ============================================================
-    // 4. 更新节点状态为 completed/failed（Redis Hash）
+    // 5. 更新节点状态为 completed/failed（Redis Hash）
+    // ⚠️ 时间戳必须由 Workflow 传入 in.CompletedAt，Activity 内不得自行使用 time.Now()
     // ============================================================
-    completedAt := time.Now() // Activity 内允许使用 time.Now()
+    if in.CompletedAt.IsZero() {
+        return DAGNodeResult{}, fmt.Errorf("completed_at is required; must be provided by workflow.Now(ctx)")
+    }
+    completedAt := in.CompletedAt
+
+    // 确定最终状态
+    finalStatus := NodeStatusCompleted
+    errorMessage := ""
     if err != nil {
-        statusJSON, _ = json.Marshal(NodeStatusInfo{
-            NodeID:       nodeID,
-            Status:       NodeStatusFailed,
-            Error:        err.Error(),
-            CompletedAt:  completedAt.UnixNano(),
-        })
+        finalStatus = NodeStatusFailed
+        errorMessage = err.Error()
+    }
+
+    // ⚠️ 必须从 newState merge（不是 oldState），确保保留 running 阶段写入的所有字段
+    // 继承：StartedAt、WorkerID、RetryCount、Progress、Layer、Dependencies、Dependents
+    finalState := newState
+    finalState.Status = finalStatus
+    finalState.CompletedAt = completedAt.UnixNano()
+    if err != nil {
+        finalState.Error = errorMessage
+        finalState.Result = nil
         // 推送 SSE 事件（failed）
-        _ = workflow.ExecuteActivity(emitCtx, "EmitTaskUpdate", EmitTaskUpdateInput{
+        a.streamPublisher.Publish(ctx, StreamEvent{
             WorkflowID: workflowID,
             EventType:  StreamEventDAGNodeFailed,
             AgentID:    "dag",
             Message:    fmt.Sprintf("node=%s failed: %v", nodeID, err),
-            Timestamp:  completedAt,
+            Timestamp: completedAt,
             Metadata: map[string]interface{}{
                 "node_id": nodeID,
-                "error":   err.Error(),
+                "error":   errorMessage,
             },
-        }).Get(ctx, nil)
-    } else {
-        statusJSON, _ = json.Marshal(NodeStatusInfo{
-            NodeID:      nodeID,
-            Status:      NodeStatusCompleted,
-            CompletedAt: completedAt.UnixNano(),
-            Result:      result,
         })
+    } else {
+        finalState.Error = nil
+        finalState.Result = result
+        finalState.Progress = 1.0
         // 推送 SSE 事件（completed）
-        _ = workflow.ExecuteActivity(emitCtx, "EmitTaskUpdate", EmitTaskUpdateInput{
+        a.streamPublisher.Publish(ctx, StreamEvent{
             WorkflowID: workflowID,
             EventType:  StreamEventDAGNodeCompleted,
             AgentID:    "dag",
             Message:    fmt.Sprintf("node=%s completed", nodeID),
-            Timestamp:  completedAt,
+            Timestamp: completedAt,
             Metadata: map[string]interface{}{
                 "node_id": nodeID,
             },
-        }).Get(ctx, nil)
+        })
     }
-    rc.HSet(ctx, nodeKey, nodeID, string(statusJSON))
+    finalJSON, _ := json.Marshal(finalState)
+    rc.HSet(ctx, nodeKey, nodeID, string(finalJSON))
 
-    return DAGNodeResult{NodeID: nodeID, Status: status, Output: result}, nil
+    return DAGNodeResult{
+        NodeID: nodeID,
+        Status: finalStatus,
+        Output: result,
+        Error:  errorMessage,
+    }, nil
 }
 ```
 
 **注意事项：**
 - 所有 Redis 操作在 Activity 内完成，不在 Workflow 内
-- SSE 事件推送通过 `EmitTaskUpdate` Activity（Gateway 订阅 SSE 流）
+- SSE/Stream 事件推送通过 Activity 内的 `a.streamPublisher.Publish()` helper
+- Activity 内不能调用 `workflow.ExecuteActivity`（workflow.* API 只能在 Workflow 内使用）
 - Dashboard 通过 Gateway SSE 流实时显示 DAG 状态
 - **时间戳从 workflow.Now(ctx) 传入 Activity，非 Activity 内部生成**
 
@@ -472,7 +560,8 @@ func ReactLoop(
 
         // ============================================================
         // Phase 1: REASON - 调用 ExecuteAgent Activity
-        // history 包含之前的 thought/action/observation
+        // history：是外部 LLM session history（用于 token budget/session 管理），由调用方传入
+        // thoughts/actions/observations：是本轮 ReAct 循环的本地中间状态，用于构造 query context
         // Activity 重试时，只有 reasonResult 丢失，history 不受影响
         // ============================================================
         reasonContext := make(map[string]interface{})
@@ -612,7 +701,7 @@ func (a *Activities) SaveReActStepAudit(ctx context.Context, in SaveReActStepInp
 - 使用 `go-cache` 等纯进程内缓存
 - 多 Worker 环境下导致"数据孤岛"——每个 Worker 有独立缓存，互不可见
 
-✅ **重构后的正确设计（两级缓存 + Redis Hash）**：
+✅ **重构后的正确设计（两级缓存 + Redis String/KV）**：
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -629,7 +718,7 @@ func (a *Activities) SaveReActStepAudit(ctx context.Context, in SaveReActStepInp
                               │ miss
                               ▼
                     ┌─────────────────┐
-                    │  L2: Redis Hash  │  (跨 Worker 共享)
+                    │  L2: Redis String/KV │  (跨 Worker 共享)
                     │  TTL: 1 小时     │
                     │  maxmemory-policy │
                     │  allkeys-lru     │
@@ -723,7 +812,7 @@ func (l *LocalTokenLRU) Set(_ context.Context, key string, count int) {
 }
 
 // ============================================================
-// L2: Redis Hash - 跨 Worker 共享，TTL 长
+// L2: Redis String/KV - 跨 Worker 共享，TTL 长
 // ============================================================
 type RedisTokenCache struct {
     cli *circuitbreaker.RedisWrapper
@@ -959,19 +1048,6 @@ echo "=== All Smoke Tests Passed ==="
 
 ---
 
-## 四、验收标准总结
-
-| Slice | 验收项 | 通过条件 |
-|-------|--------|----------|
-| Slice 10 DAG 可视化 | 节点状态实时更新 | pending → running → completed 在 1s 内显示 |
-| Slice 11 ReAct 暂停/恢复 | Activity 重试不丢上下文 | 单次 Activity 失败不影响其他迭代的 history |
-| Slice 12 两级 LRU | 缓存命中率 | L1 miss → L2 hit → Python Service miss |
-| Slice 13 DAG 动态重规划 | 失败回退 | node 失败后依赖节点标记 skipped |
-| Slice 14 并发控制增强 | 并发限制 | max_parallel_agents=3 时同时运行 ≤ 3 |
-| Slice 15 边界测试 | Smoke Test | 所有 4 个测试用例通过 |
-
----
-
 ## 五、明确禁止事项
 
 - ❌ Workflow 内直接创建 goroutine（并发通过 `workflow.ExecuteActivity` + `LocalDispatchOptions` 实现）
@@ -983,9 +1059,7 @@ echo "=== All Smoke Tests Passed ==="
 
 ---
 
----
-
-## 四、API 设计
+## 六、API 设计
 
 ### 4.1 POST /api/v1/tasks
 
@@ -1106,7 +1180,7 @@ echo "=== All Smoke Tests Passed ==="
 
 ---
 
-## 五、状态与错误
+## 七、状态与错误
 
 ### 5.1 任务状态枚举
 
@@ -1162,7 +1236,7 @@ pending → running → completed
 
 ---
 
-## 六、修改文件清单
+## 八、修改文件清单
 
 ### Phase 4A Slice 10：DAG 可视化
 
@@ -1187,7 +1261,7 @@ pending → running → completed
 
 | 操作 | 文件 | 说明 |
 |------|------|------|
-| 新建 | `internal/activities/token_cache.go` | 两级缓存实现（LocalLRU + Redis Hash） |
+| 新建 | `internal/activities/token_cache.go` | 两级缓存实现（LocalLRU + Redis String/KV） |
 | 修改 | `internal/activities/budget.go` | EstimatePromptTokensActivity 改用两级缓存 |
 | 修改 | `config/features.yaml` | 新增 l1_cache_ttl_seconds, l2_cache_ttl_seconds |
 
@@ -1207,7 +1281,7 @@ pending → running → completed
 
 ---
 
-## 七、测试脚本
+## 九、测试脚本
 
 ### smoke_test_phase4.sh
 
@@ -1328,16 +1402,20 @@ echo "=== Phase 4 Smoke Tests PASSED ==="
 
 ---
 
-## 八、验收标准
+## 十、验收标准
 
 ### 8.1 Slice 10：DAG 可视化
 
 | 验收项 | 标准 | 验证方式 |
 |--------|------|----------|
-| DAG 状态 API | GET /api/v1/tasks/{id}/dag 返回节点状态 | curl 验证 JSON 结构 |
-| 节点状态实时更新 | pending → running → completed 在 1s 内反映到 Redis | redis-cli HGETALL |
-| SSE 事件推送 | DAG_NODE_RUNING/COMPLETED 事件推送到 SSE | redis-cli XRANGE |
-| 并发进度显示 | 多个节点并发执行时，Dashboard 同时显示多个 running | SSE 流验证 |
+| **DAG Graph 边验证** | Redis node JSON 中必须包含 `dependencies` 字段；`draft_answer.dependencies` 必须包含 `analyze_input` | redis-cli HGET |
+| **有向图展示** | Dashboard 必须展示 DAG graph 区域；能看到 `analyze_input --> draft_answer` 有向边 | HTML / SSE 流验证 |
+| **Dependencies 列** | 节点表格的 Dependencies 列必须显示 `analyze_input`，不能用 layer 推断 | curl GET /api/v1/tasks/{id}/dag |
+| **节点颜色** | completed 节点显示绿色，failed 节点显示红色 | Dashboard 可视化验证 |
+| **状态实时更新** | pending → running → completed 在 1s 内反映到 Redis | redis-cli HGETALL |
+| **SSE 事件推送** | DAG_NODE_RUNING/COMPLETED 事件推送到 SSE | redis-cli XRANGE |
+| **并发进度显示** | 多个节点并发执行时，Dashboard 同时显示多个 running | SSE 流验证 |
+| **test_dag_visual.sh** | 脚本必须验证 HTML 或 graph 输出中存在有向边表达 | bash scripts/test_dag_visual.sh |
 
 ### 8.2 Slice 11：ReAct 暂停/恢复（重构）
 
@@ -1354,7 +1432,7 @@ echo "=== Phase 4 Smoke Tests PASSED ==="
 |--------|------|----------|
 | 两级缓存命中 | L1 miss → L2 hit → Python service miss | 日志验证 |
 | L1 LocalLRU | 相同 text+model 第二次调用 < 1ms | 性能测试 |
-| L2 Redis Hash | 跨 Worker 共享，TTL 1h | redis-cli TTL |
+| L2 Redis String | 跨 Worker 共享，TTL 1h | redis-cli GET |
 | Redis LRU 驱逐 | maxmemory-policy allkeys-lru 生效 | 内存压力测试 |
 | 统计准确 | hits + misses = 总请求数 | redis-cli HGETALL |
 
@@ -1376,7 +1454,7 @@ echo "=== Phase 4 Smoke Tests PASSED ==="
 
 ---
 
-## 九、成功路径 / 失败路径
+## 十一、成功路径 / 失败路径
 
 ### Slice 10：DAG 可视化
 
@@ -1386,7 +1464,7 @@ POST /api/v1/tasks {enable_dag_visualization: true}
   → Gateway 创建 task，返回 task_id
   → Temporal Worker 调度 DAGWorkflow
   → DAGNodeActivity 更新节点状态到 Redis Hash
-  → EmitTaskUpdateActivity 推送 SSE 事件
+  → DAGNodeActivity 内部通过 streamPublisher.Publish 推送 SSE 事件
   → GET /api/v1/tasks/{id}/dag 返回节点状态
 ```
 
@@ -1450,29 +1528,57 @@ DAG 整体返回 completed（含失败信息）
 
 ---
 
-## 十、后续扩展路线图
+## 十二、后续扩展路线图
 
 | Phase | 内容 | 关键能力 |
 |-------|------|---------|
-| Phase 5 | Swarm / Agent P2P / workspace | Lead Agent + workers + workspace 文件共享 |
-| Phase 6 | RAG / Qdrant / MCP / Sandbox | 向量检索、MCP 协议、WASI code execution |
-| Phase 7 | HITL / Approval / UI | Human-in-loop approval、Desktop UI |
-| Phase 8 | SDK / CLI / Multi-tenant | Python/Go SDK、CLI tool、Auth/Quota |
+| Phase 5 | Swarm / Agent P2P / Workspace / Handoff | Lead Agent + workers + workspace + agent handoff |
+| Phase 6A | MCP Tool Runtime | MCP client/server、tool discovery、tool call audit |
+| Phase 6B | Sandbox / WASI Execution | 安全代码执行、timeout、resource limit |
+| Phase 6C | Skills System | Skill Manifest、Skill Registry、Skill Executor、Skill Permission |
+| Phase 6D | Hooks Event System | before_tool_call、after_tool_call、on_agent_step、on_error |
+| Phase 6E | RAG / Qdrant Long-term Memory | embedding、chunking、Qdrant upsert/search、长期记忆 |
+| Phase 6F | Research-Synthesis v1 | RAG + Workspace evidence synthesis |
+| Phase 7A | HITL / Approval / UI | 人类审批、任务暂停恢复、Dashboard 操作 |
+| Phase 7B | Reflection Production Mode | generate -> reflect -> revise，多轮 reflection |
+| Phase 7C | Tree-of-Thoughts | 多候选路径、评分、剪枝、token budget 控制 |
+| Phase 7D | Debate Mode | Pro Agent、Con Agent、Judge Agent、多轮辩论 |
+| Phase 7E | Research-Synthesis v2 | 多来源证据、冲突证据处理、引用链路 |
+| Phase 8 | SDK / CLI / Multi-tenant | Python/Go SDK、CLI、Auth/Quota、配置导入导出 |
 
 ---
 
-## 十一、Shannon 原生能力 vs Lite 实现对照
+## 十三、Phase 4 明确不做范围
+
+以下能力**不进入** Phase 4，明确推迟到后续 Phase：
+
+| 能力 | 推迟到 | 原因 |
+|------|--------|------|
+| Reflection 独立模式 | Phase 7B | Reflection 需要完整 Workspace 和 LLM synthesis 基线 |
+| Handoff 机制 | Phase 5G | 需要先有 Lead Agent / Worker Agent 基础架构 |
+| Skills 系统 | Phase 6C | 需要 Skill Manifest 和 Registry 设计 |
+| Hooks 事件系统 | Phase 6D | 需要 Hook 点定义和 Event Bus 设计 |
+| RAG / Qdrant | Phase 6E | 需要 embedding 服务和向量存储基础设施 |
+| Tree-of-Thoughts | Phase 7C | 需要多候选路径和评分机制 |
+| Debate 模式 | Phase 7D | 需要 Pro/Con/Judge Agent 对立架构 |
+| 完整 Research-Synthesis | Phase 6F / 7E | 需要 RAG + Workspace evidence 基线 |
+
+**Phase 4 范围锁定：DAG 可视化 + ReAct 暂停恢复 + 两级 LRU + DAG 动态重规划 + 并发控制 + Real LLM smoke/E2E。**
+
+---
+
+## 十四、Shannon 原生能力 vs Lite 实现对照
 
 | 功能 | Shannon 原生能力 | Cribug Phase 4 Lite | 说明 |
 |------|-----------------|---------------------|------|
-| DAG 可视化 | 实时节点状态 + SSE | Redis Hash + EmitTaskUpdate | 无 WebSocket 推送 |
+| DAG 可视化 | 实时节点状态 + SSE | Redis Hash + streamPublisher | 无 WebSocket 推送 |
 | ReAct 暂停恢复 | Postgres 审计 + Workflow replay | 两级缓存 + Activity 重试保护 | history 通过参数传递 |
-| 两级 LRU | LocalLRU + Redis Hash | L1 Local (5min) + L2 Redis (1h) | 无持久化 LRU |
+| 两级 LRU | LocalLRU + Redis String | L1 Local (5min) + L2 Redis String (1h) | 无持久化 LRU |
 | DAG 动态重规划 | 节点失败自动跳过 | HandleDAGNodeFailure Activity | 无自动重规划 |
 
 ---
 
-## 十二、开发者配置参考
+## 十五、开发者配置参考
 
 ### 12.1 Feature Flags
 
@@ -1485,7 +1591,7 @@ DAG 整体返回 completed（含失败信息）
 | dag_ttl_seconds | int | 86400 | DAG 节点 Redis TTL |
 | react_steps_ttl_seconds | int | 86400 | ReAct steps Redis TTL |
 | l1_cache_ttl_seconds | int | 300 | L1 LocalLRU TTL（5 分钟） |
-| l2_cache_ttl_seconds | int | 3600 | L2 Redis Hash TTL（1 小时） |
+| l2_cache_ttl_seconds | int | 3600 | L2 Redis String TTL（1 小时） |
 | heartbeat_timeout_seconds | int | 90 | 节点心跳超时 |
 
 ### 12.2 资源配置
@@ -1510,14 +1616,26 @@ LLM_SERVICE_URL=http://python-llm:8000
 # Redis LRU 配置（redis.conf）
 maxmemory-policy allkeys-lru
 
+# Real LLM Test 开关（默认关闭，不进入 CI）
+REAL_LLM_TEST=0  # 0=默认关闭，1=手动启用真实 LLM 测试
+
 # Python LLM Service
 LLM_MODE=mock  # mock | openai_compatible
+LLM_PROVIDER=openai_compatible
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=gpt-4o-mini
 OPENAI_API_KEY=sk-xxx
+
+# Real LLM 限制
+LLM_TEMPERATURE=0
+LLM_MAX_TOKENS=512
+LLM_TIMEOUT_SECONDS=60
+REAL_LLM_TEST_MAX_COST_USD=1
 ```
 
 ---
 
-## 参考实现
+## 十六、参考实现
 
 - DAG Workflow 实现：`go/orchestrator/internal/workflows/dag_workflow.go`
 - ReAct Loop 实现：`go/orchestrator/internal/workflows/patterns/react.go`
