@@ -66,6 +66,9 @@ const (
 	EventTypeWorkspaceItemUsed        = "WORKSPACE_ITEM_USED"
 	EventTypeWorkspaceItemFailed      = "WORKSPACE_ITEM_FAILED"
 	EventTypeWorkspaceSummaryUpdated  = "WORKSPACE_SUMMARY_UPDATED"
+	// State Synchronization events (Phase 5D Slice 13)
+	EventTypeSignalReceived  = "SIGNAL_RECEIVED"
+	EventTypeSignalResponded = "SIGNAL_RESPONDED"
 )
 
 type AgentEvent struct {
@@ -607,6 +610,24 @@ func NewWorkspaceSummaryUpdatedEvent(taskID, workflowID string, totalItems, crea
 	return NewAgentEvent(EventTypeWorkspaceSummaryUpdated, map[string]interface{}{
 		"task_id": taskID, "workflow_id": workflowID,
 		"total_items": totalItems, "created_items": createdItems, "read_items": readItems,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// State Synchronization events (Phase 5D Slice 13)
+
+func NewSignalReceivedEvent(taskID, workflowID, signalType, agentID string) AgentEvent {
+	return NewAgentEvent(EventTypeSignalReceived, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID,
+		"signal_type": signalType, "agent_id": agentID,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewSignalRespondedEvent(taskID, workflowID, signalType, status string) AgentEvent {
+	return NewAgentEvent(EventTypeSignalResponded, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID,
+		"signal_type": signalType, "status": status,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	})
 }

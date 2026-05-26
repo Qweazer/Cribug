@@ -165,6 +165,38 @@ type WorkspaceSummary struct {
 	PerTypeCount  map[string]int   `json:"per_type_item_count,omitempty"`
 }
 
+// ── Mailbox / SignalChannel (Phase 5D) ─────────────────────────
+
+type MailboxMessage struct {
+	MessageID   string `json:"message_id"`
+	WorkflowID  string `json:"workflow_id"`
+	SignalType  string `json:"signal_type"`
+	AgentID     string `json:"agent_id,omitempty"`
+	Content     string `json:"content,omitempty"`
+	TimestampNs int64  `json:"timestamp_ns"`
+}
+
+// SignalType constants
+const (
+	SignalStatusQuery  = "status_query"
+	SignalWorkerUpdate = "worker_update"
+	SignalCancel       = "cancel"
+)
+
+// MailboxResponse is sent back in response to a signal
+type MailboxResponse struct {
+	MessageID      string `json:"message_id"`
+	SignalType     string `json:"signal_type"`
+	SwarmStatus    string `json:"swarm_status"`
+	Succeeded      int    `json:"succeeded"`
+	Failed         int    `json:"failed"`
+	TimeoutCount   int    `json:"timeout"`
+	TotalTokens    int    `json:"total_tokens"`
+	ActiveRound    int    `json:"active_round"`
+	WorkspaceItems int    `json:"workspace_items"`
+	P2PMessages    int    `json:"p2p_messages"`
+}
+
 // ── Status Constants ────────────────────────────────────────────
 
 const (

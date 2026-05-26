@@ -78,8 +78,47 @@ func (sw *SwarmWorkflow) Execute(ctx workflow.Context, req types.SwarmWorkflowIn
 	// Per-worker inbox for next round: agentID → messages
 	inboxes := make(map[string][]types.AgentMessage)
 
+	// ── SignalChannel for state queries (Phase 5D) ───────────────
+	sigCh := workflow.GetSignalChannel(ctx, "swarm_mailbox")
+	var signalCount int
+
 	// ── Execute rounds ───────────────────────────────────────────
 	for round := 0; round <= req.MaxP2PRounds; round++ {
+		// Non-blocking signal check at start of each round (Phase 5D)
+		sigSel := workflow.NewSelector(ctx)
+		var sigMsg types.MailboxMessage
+		hasSignal := false
+		sigSel.AddReceive(sigCh, func(c workflow.ReceiveChannel, more bool) {
+			c.Receive(ctx, &sigMsg)
+			hasSignal = true
+		})
+		zeroTimer := workflow.NewTimer(ctx, 0)
+		sigSel.AddFuture(zeroTimer, func(f workflow.Future) { f.Get(ctx, nil) })
+		sigSel.Select(ctx)
+
+		if hasSignal {
+			signalCount++
+			logger.Info("SwarmWorkflow received signal", "type", sigMsg.SignalType, "agent", sigMsg.AgentID)
+			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+				TaskID: req.TaskID,
+				Event:  events.NewSignalReceivedEvent(req.TaskID, req.WorkflowID, sigMsg.SignalType, sigMsg.AgentID),
+			}).Get(ctx, nil)
+
+			if sigMsg.SignalType == types.SignalStatusQuery {
+				resp := types.MailboxResponse{
+					MessageID: sigMsg.MessageID, SignalType: types.SignalStatusQuery,
+					SwarmStatus: "running", Succeeded: succeeded, Failed: failed,
+					TimeoutCount: timedOut, TotalTokens: totalTokens,
+					ActiveRound: round, WorkspaceItems: len(workspaceItems),
+					P2PMessages: len(allMessages),
+				}
+				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+					TaskID: req.TaskID,
+					Event:  events.NewSignalRespondedEvent(req.TaskID, req.WorkflowID, sigMsg.SignalType, resp.SwarmStatus),
+				}).Get(ctx, nil)
+				logger.Info("SwarmWorkflow responded to status_query", "succeeded", succeeded, "round", round)
+			}
+		}
 		// Determine which workers to run this round
 		type roundTask struct {
 			def    workerDef
