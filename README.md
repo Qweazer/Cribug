@@ -465,6 +465,26 @@ Testing:
 bash scripts/test_dag_dynamic_replan.sh
 ```
 
+### Phase 4F Slice 15: Final Boundary Verification & Real LLM E2E Smoke
+
+Phase 4 closing stage — no new features. Verifies all Slice 10-14 combinations.
+
+**Deterministic boundary tests** (default CI):
+```bash
+bash scripts/test_phase4_boundaries.sh   # 10 edge cases
+bash scripts/smoke_test_phase4.sh        # full Phase 4 suite
+```
+
+**Optional real LLM E2E smoke** (manual only):
+```bash
+RUN_REAL_LLM_SMOKE=1 bash scripts/test_phase4_real_llm_e2e.sh
+```
+
+Phase 4 known limitations:
+- Concurrency uses batch-based gating (not open-node semaphore)
+- Strictly guarantees peak ≤ max_parallel_agents; not maximally efficient across layers
+- Future optimization: cross-layer ready-node scheduling
+
 ## What We DON'T Do (Yet)
 
 This MVP does NOT currently include:
