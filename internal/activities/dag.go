@@ -195,6 +195,7 @@ type ExecuteDAGNodeInput struct {
 	Model           string
 	Temperature     float64
 	MaxTokens       int
+	TestFailNodeID  string // Slice 13 test hook: if matches Node.ID, return deterministic error
 }
 
 type ExecuteDAGNodeOutput struct {
@@ -209,6 +210,12 @@ func (a *DAGActivities) ExecuteDAGNode(ctx context.Context, input ExecuteDAGNode
 		"node_id", input.Node.ID,
 		"node_type", input.Node.Type,
 		"use_llm", input.Node.UseLLM)
+
+	// Slice 13 test hook: deterministic failure injection for DAG replan testing
+	if input.TestFailNodeID != "" && input.Node.ID == input.TestFailNodeID {
+		logger.Warn("ExecuteDAGNodeActivity: test fail node triggered", "node_id", input.Node.ID)
+		return nil, fmt.Errorf("test failure injection: node '%s' failed by test hook", input.Node.ID)
+	}
 
 	// Update Redis status to "running"
 	if a.redisClient != nil {

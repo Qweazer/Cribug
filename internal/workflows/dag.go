@@ -415,6 +415,7 @@ Output your answer directly:`, req.Query, upstreamContext, node.Name, node.Type)
 					Model:           req.Model,
 					Temperature:     req.Temperature,
 					MaxTokens:       req.MaxCompletionTokens,
+					TestFailNodeID:  req.TestFailNodeID,
 				})
 			}
 		}
@@ -437,10 +438,6 @@ Output your answer directly:`, req.Query, upstreamContext, node.Name, node.Type)
 				skippedNodes[nodeID] = true
 
 				// Call HandleDAGNodeFailureActivity to propagate skip to dependents
-				allNodeIDs := make([]string, 0, len(plan.Nodes))
-				for _, n := range plan.Nodes {
-					allNodeIDs = append(allNodeIDs, n.ID)
-				}
 				failureOutput := &types.HandleDAGNodeFailureOutput{}
 				_ = workflow.ExecuteActivity(ctx, "HandleDAGNodeFailureActivity", types.HandleDAGNodeFailureInput{
 					WorkflowID:   req.WorkflowID,
@@ -448,7 +445,7 @@ Output your answer directly:`, req.Query, upstreamContext, node.Name, node.Type)
 					FailedNodeID: nodeID,
 					Error:        err.Error(),
 					FailedAtNs:   workflow.Now(ctx).UnixNano(),
-					AllNodeIDs:   allNodeIDs,
+					AllNodes:     plan.Nodes,
 				}).Get(ctx, failureOutput)
 				if failureOutput != nil && len(failureOutput.SkippedNodes) > 0 {
 					for _, sid := range failureOutput.SkippedNodes {

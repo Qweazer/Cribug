@@ -58,12 +58,12 @@ type DAGSynthesisResult struct {
 
 // HandleDAGNodeFailureInput is the input for HandleDAGNodeFailureActivity
 type HandleDAGNodeFailureInput struct {
-	WorkflowID    string `json:"workflow_id"`
-	TaskID        string `json:"task_id"`
-	FailedNodeID  string `json:"failed_node_id"`
-	Error         string `json:"error"`
-	FailedAtNs    int64  `json:"failed_at_ns"`
-	AllNodeIDs    []string `json:"all_node_ids"`
+	WorkflowID    string    `json:"workflow_id"`
+	TaskID        string    `json:"task_id"`
+	FailedNodeID  string    `json:"failed_node_id"`
+	Error         string    `json:"error"`
+	FailedAtNs    int64     `json:"failed_at_ns"`
+	AllNodes      []DAGNode `json:"all_nodes"` // Full DAG plan for dependency graph
 }
 
 // HandleDAGNodeFailureOutput contains the result of failure handling

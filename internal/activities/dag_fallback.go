@@ -66,12 +66,27 @@ func (a *DAGFallbackActivities) HandleDAGNodeFailure(ctx context.Context, input 
 		}
 	}
 
-	// Build dependency map: nodeID → []dependentIDs
-	// A node B depends on A if A ∈ B.Dependencies → B is a dependent of A
+	// Build dependency map from the full DAG plan (not Redis, which may not have all nodes yet)
 	dependents := make(map[string][]string)
-	for nodeID, ns := range nodeStatuses {
-		for _, dep := range ns.Dependencies {
-			dependents[dep] = append(dependents[dep], nodeID)
+	for _, node := range input.AllNodes {
+		for _, dep := range node.DependsOn {
+			dependents[dep] = append(dependents[dep], node.ID)
+		}
+	}
+	// Ensure all nodes are in nodeStatuses (including ones not yet written to Redis)
+	for _, node := range input.AllNodes {
+		if _, ok := nodeStatuses[node.ID]; !ok {
+			nodeStatuses[node.ID] = types.DAGNodeStatus{
+				NodeID:       node.ID,
+				Dependencies: node.DependsOn,
+			}
+		} else {
+			// Merge dependencies from plan into existing status
+			ns := nodeStatuses[node.ID]
+			if len(ns.Dependencies) == 0 {
+				ns.Dependencies = node.DependsOn
+				nodeStatuses[node.ID] = ns
+			}
 		}
 	}
 

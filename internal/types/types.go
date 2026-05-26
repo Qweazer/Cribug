@@ -35,6 +35,7 @@ type TaskConfig struct {
 	MaxParallelAgents   *int     `json:"max_parallel_agents,omitempty"`
 	EnableReAct         *bool    `json:"enable_react,omitempty"`
 	ReActMaxIterations  *int     `json:"react_max_iterations,omitempty"`
+	TestFailNodeID      *string  `json:"test_fail_node_id,omitempty"` // Slice 13 test hook: returns deterministic error for this node
 }
 
 const (
@@ -154,6 +155,9 @@ type WorkflowTaskRequest struct {
 	// ReAct Config
 	EnableReAct        bool `json:"enable_react,omitempty"`
 	ReActMaxIterations int  `json:"react_max_iterations,omitempty"`
+
+	// Test hook for Slice 13 DAG dynamic replan testing
+	TestFailNodeID string `json:"test_fail_node_id,omitempty"`
 
 	// ReactConfig is computed from EnableReAct + ReActMaxIterations
 	ReactConfig *ReactLoopConfig `json:"-"`

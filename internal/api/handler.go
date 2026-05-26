@@ -102,6 +102,7 @@ func (h *Handler) createTask(w http.ResponseWriter, r *http.Request) {
 		MaxParallelAgents:   maxParallelAgents,
 		EnableReAct:         enableReAct,
 		ReActMaxIterations:  reactMaxIterations,
+			TestFailNodeID:      getTestFailNodeID(req.Config),
 	}
 
 	if h.temporal == nil {
@@ -225,6 +226,13 @@ func (h *Handler) extractConcurrencyConfig(cfg *types.TaskConfig) (maxParallelAg
 	}
 
 	return
+}
+
+func getTestFailNodeID(cfg *types.TaskConfig) string {
+	if cfg != nil && cfg.TestFailNodeID != nil {
+		return *cfg.TestFailNodeID
+	}
+	return ""
 }
 
 func (h *Handler) getTask(w http.ResponseWriter, r *http.Request) {
