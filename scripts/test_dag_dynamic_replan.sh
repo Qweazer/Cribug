@@ -84,9 +84,13 @@ echo "$NODE_DATA" | grep -q '"research".*"status":"failed"' || fail "research no
 echo "$NODE_DATA" | grep -q '"research".*"error":"' || fail "research missing error field"
 log "  research=failed with error: PASSED"
 
-# Verify analyze = completed (independent branch)
-echo "$NODE_DATA" | grep -q '"analyze".*"status":"completed"' || fail "analyze node not completed (independent branch should survive)"
-log "  analyze=completed (independent branch survived): PASSED"
+# Verify analyze = completed (X = independent branch root)
+echo "$NODE_DATA" | grep -q '"analyze".*"status":"completed"' || fail "analyze (X) not completed"
+log "  analyze(X)=completed: PASSED"
+
+# Verify conclude = completed (Y depends on X only, X succeeded → Y should succeed)
+echo "$NODE_DATA" | grep -q '"conclude".*"status":"completed"' || fail "conclude (Y) not completed — independent branch X→Y broken"
+log "  conclude(Y)=completed (X→Y independent branch): PASSED"
 
 # Verify compare = skipped (depends on failed research)
 echo "$NODE_DATA" | grep -q '"compare".*"status":"skipped"' || fail "compare not skipped"

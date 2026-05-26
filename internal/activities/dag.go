@@ -106,11 +106,12 @@ func (a *DAGActivities) PlanDAG(ctx context.Context, input PlanDAGInput) (*PlanD
 	logger := activity.GetLogger(ctx)
 	logger.Info("PlanDAGActivity started", "task_id", input.TaskID)
 
-	// Generate 6-node complex DAG for better visualization:
+	// Generate 7-node DAG for visualization and replan testing:
 	// Layer 0: research (no deps)
 	// Layer 0: analyze (no deps)
 	// Layer 1: compare (depends on research, analyze)
 	// Layer 1: validate (depends on research, analyze)
+	// Layer 1: conclude (depends on analyze only - independent branch)
 	// Layer 2: draft (depends on compare, validate)
 	// Layer 3: review (depends on draft)
 	plan := &types.DAGPlan{
@@ -147,7 +148,15 @@ func (a *DAGActivities) PlanDAG(ctx context.Context, input PlanDAGInput) (*PlanD
 				Input:     "Check for gaps and inconsistencies",
 				DependsOn: []string{"research", "analyze"},
 				UseLLM:    false, // mock for diversity
-			},
+				},
+				{
+					ID:        "conclude",
+					Type:      "synthesis",
+					Name:      "Conclude Independent Branch",
+					Input:     "Summarize findings from analyze only",
+					DependsOn: []string{"analyze"},
+					UseLLM:    false,
+				},
 			{
 				ID:        "draft",
 				Type:      "synthesis",
@@ -171,6 +180,7 @@ func (a *DAGActivities) PlanDAG(ctx context.Context, input PlanDAGInput) (*PlanD
 			{From: "research", To: "validate"},
 			{From: "analyze", To: "compare"},
 			{From: "analyze", To: "validate"},
+				{From: "analyze", To: "conclude"},
 			{From: "compare", To: "draft"},
 			{From: "validate", To: "draft"},
 			{From: "draft", To: "review"},
