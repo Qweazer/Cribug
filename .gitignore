@@ -36,3 +36,4 @@ Thumbs.db
 
 # Local Go workspace (do not track)
 go/
+scripts/
