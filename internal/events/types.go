@@ -69,6 +69,11 @@ const (
 	// State Synchronization events (Phase 5D Slice 13)
 	EventTypeSignalReceived  = "SIGNAL_RECEIVED"
 	EventTypeSignalResponded = "SIGNAL_RESPONDED"
+	// Agent Handoff events (Phase 5G Slice 16)
+	EventTypeHandoffRequested = "HANDOFF_REQUESTED"
+	EventTypeHandoffAccepted  = "HANDOFF_ACCEPTED"
+	EventTypeHandoffRejected  = "HANDOFF_REJECTED"
+	EventTypeHandoffCompleted = "HANDOFF_COMPLETED"
 )
 
 type AgentEvent struct {
@@ -628,6 +633,40 @@ func NewSignalRespondedEvent(taskID, workflowID, signalType, status string) Agen
 	return NewAgentEvent(EventTypeSignalResponded, map[string]interface{}{
 		"task_id": taskID, "workflow_id": workflowID,
 		"signal_type": signalType, "status": status,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// Agent Handoff events (Phase 5G Slice 16)
+
+func NewHandoffRequestedEvent(taskID, workflowID, sourceAgent, targetAgent, reason string, round int) AgentEvent {
+	return NewAgentEvent(EventTypeHandoffRequested, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID,
+		"source_agent": sourceAgent, "target_agent": targetAgent, "reason": reason, "round": round,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewHandoffAcceptedEvent(taskID, workflowID, sourceAgent, targetAgent string, round int) AgentEvent {
+	return NewAgentEvent(EventTypeHandoffAccepted, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID,
+		"source_agent": sourceAgent, "target_agent": targetAgent, "round": round,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewHandoffRejectedEvent(taskID, workflowID, sourceAgent, targetAgent, reason string, round int) AgentEvent {
+	return NewAgentEvent(EventTypeHandoffRejected, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID,
+		"source_agent": sourceAgent, "target_agent": targetAgent, "reason": reason, "round": round,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewHandoffCompletedEvent(taskID, workflowID, handoffID, targetAgent string, round int) AgentEvent {
+	return NewAgentEvent(EventTypeHandoffCompleted, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID,
+		"handoff_id": handoffID, "target_agent": targetAgent, "round": round,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	})
 }

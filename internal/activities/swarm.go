@@ -63,6 +63,18 @@ func (a *SwarmActivities) WorkerAgent(ctx context.Context, input types.WorkerAge
 	// Generate deterministic outbound messages based on role (Phase 5B)
 	outbound, wsAppends := generateOutboundMessages(input, resp.Content)
 
+	// Generate handoff request for researcher role (Phase 5G)
+	var handoff *types.HandoffRequest
+	if input.Role == "researcher" && input.Round == 0 {
+		handoff = &types.HandoffRequest{
+			WorkflowID: input.WorkflowID, TaskID: input.TaskID,
+			SourceAgentID: input.AgentID, TargetAgentID: "worker-2",
+			Reason: "handing off research to critic",
+			ContextSnapshot: abbreviate(resp.Content, 200),
+			PartialResult: abbreviate(resp.Content, 200),
+		}
+	}
+
 	logger.Info("WorkerAgentActivity completed",
 		"agent_id", input.AgentID, "role", input.Role,
 		"tokens", resp.Usage.TotalTokens, "outbound", len(outbound))
@@ -82,6 +94,7 @@ func (a *SwarmActivities) WorkerAgent(ctx context.Context, input types.WorkerAge
 				WorkspaceAppends:  wsAppends,
 				WorkspaceReads:    collectWorkspaceReads(input),
 				WorkspaceUsedIDs:  collectWorkspaceReads(input),
+				HandoffRequest:    handoff,
 	}, nil
 }
 

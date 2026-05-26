@@ -66,6 +66,7 @@ type WorkerAgentResult struct {
 	WorkspaceAppends    []WorkspaceItem  `json:"workspace_appends,omitempty"`    // Phase 5C
 	WorkspaceReads      []string         `json:"workspace_reads,omitempty"`       // Phase 5C
 	WorkspaceUsedIDs    []string         `json:"workspace_used_item_ids,omitempty"` // Phase 5C
+	HandoffRequest      *HandoffRequest  `json:"handoff_request,omitempty"`          // Phase 5G
 }
 
 // ── Agent P2P Message (Phase 5B) ───────────────────────────────
@@ -219,6 +220,35 @@ type TeamActionDecision struct {
 	Allowed bool   `json:"allowed"`
 	Reason  string `json:"reason,omitempty"`
 }
+
+// ── Agent Handoff (Phase 5G) ──────────────────────────────────
+
+type HandoffRequest struct {
+	WorkflowID      string `json:"workflow_id"`
+	TaskID          string `json:"task_id"`
+	SourceAgentID   string `json:"source_agent_id"`
+	TargetAgentID   string `json:"target_agent_id"`
+	Reason          string `json:"reason"`
+	ContextSnapshot string `json:"context_snapshot,omitempty"`
+	PartialResult   string `json:"partial_result,omitempty"`
+}
+
+type HandoffEvent struct {
+	HandoffID string        `json:"handoff_id"`
+	Status    string        `json:"status"`
+	Request   HandoffRequest `json:"request"`
+	Round     int           `json:"round"`
+}
+
+// Handoff status constants
+const (
+	HandoffRequested = "requested"
+	HandoffAccepted  = "accepted"
+	HandoffRejected  = "rejected"
+	HandoffCompleted = "completed"
+	HandoffFailed    = "failed"
+	HandoffTimedOut  = "timed_out"
+)
 
 // ── Status Constants ────────────────────────────────────────────
 

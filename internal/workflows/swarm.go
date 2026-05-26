@@ -228,6 +228,56 @@ func (sw *SwarmWorkflow) Execute(ctx workflow.Context, req types.SwarmWorkflowIn
 					}).Get(ctx, nil)
 				}
 
+				// Handle handoff request (Phase 5G)
+				if wr.HandoffRequest != nil {
+					hr := wr.HandoffRequest
+					workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+						TaskID: req.TaskID,
+						Event: events.NewHandoffRequestedEvent(req.TaskID, req.WorkflowID, hr.SourceAgentID, hr.TargetAgentID, hr.Reason, round),
+					}).Get(ctx, nil)
+
+					// Validate target agent
+					if _, ok := agentIDs[hr.TargetAgentID]; ok {
+						he := types.HandoffEvent{
+							HandoffID: fmt.Sprintf("ho-%s-r%d-%s-%s", req.WorkflowID, round, hr.SourceAgentID, hr.TargetAgentID),
+							Status: types.HandoffAccepted, Request: *hr, Round: round,
+						}
+						workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+							TaskID: req.TaskID,
+							Event: events.NewHandoffAcceptedEvent(req.TaskID, req.WorkflowID, hr.SourceAgentID, hr.TargetAgentID, round),
+						}).Get(ctx, nil)
+
+						// Schedule target worker with handoff context
+						targetWf := agentIDs[hr.TargetAgentID]
+						hoTask := fmt.Sprintf("Handoff from %s: %s. Context: %s", hr.SourceAgentID, hr.Reason, hr.ContextSnapshot)
+						hoFuture := workflow.ExecuteActivity(ctx, "WorkerAgentActivity", types.WorkerAgentInput{
+							TaskID: req.TaskID, WorkflowID: req.WorkflowID, RunID: req.RunID,
+							AgentID: hr.TargetAgentID, Role: targetWf.Role, Task: hoTask,
+							Model: req.Model, Temperature: req.Temperature, MaxTokens: req.MaxTokens,
+							Round: round, WorkspaceItems: workspaceItems,
+							WorkspaceSummary: buildWorkspaceSummary(workspaceItems),
+						})
+
+						var hoResult types.WorkerAgentResult
+						if hoErr := hoFuture.Get(ctx, &hoResult); hoErr == nil {
+							succeeded++; totalTokens += hoResult.TotalTokens; totalLatency += hoResult.LatencyMs
+							allResults = append(allResults, hoResult)
+							he.Status = types.HandoffCompleted
+							workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+								TaskID: req.TaskID,
+								Event: events.NewHandoffCompletedEvent(req.TaskID, req.WorkflowID, he.HandoffID, hr.TargetAgentID, round),
+							}).Get(ctx, nil)
+						} else {
+							he.Status = types.HandoffFailed
+						}
+					} else {
+						workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+							TaskID: req.TaskID,
+							Event: events.NewHandoffRejectedEvent(req.TaskID, req.WorkflowID, hr.SourceAgentID, hr.TargetAgentID, "invalid target", round),
+						}).Get(ctx, nil)
+					}
+				}
+
 				// Route outbound messages
 					for _, msg := range wr.OutboundMessages {
 						msg.Status = types.MsgStatusCreated
