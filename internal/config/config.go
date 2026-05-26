@@ -28,6 +28,11 @@ type Config struct {
 	EnableReAct          bool
 	ReActMaxIterations   int
 	ReActStepsTTLSeconds int
+
+	// MCP Tool Runtime (Phase 6A Slice 17)
+	EnableMCP               bool
+	MCPDefaultTimeoutSec    int
+	MCPResultSizeLimitBytes int
 }
 
 func Load() *Config {
@@ -53,6 +58,11 @@ func Load() *Config {
 		EnableReAct:          getEnvAsBool("ENABLE_REACT", false),
 		ReActMaxIterations:   getEnvAsInt("REACT_MAX_ITERATIONS", 3),
 		ReActStepsTTLSeconds: getEnvAsInt("REACT_STEPS_TTL_SECONDS", 86400),
+
+		// MCP Tool Runtime (Phase 6A Slice 17)
+		EnableMCP:               getEnvAsBool("ENABLE_MCP", false),
+		MCPDefaultTimeoutSec:    getEnvAsInt("MCP_DEFAULT_TIMEOUT_SEC", 30),
+		MCPResultSizeLimitBytes: getEnvAsInt("MCP_RESULT_SIZE_LIMIT_BYTES", 65536),
 	}
 
 	if urlStr := os.Getenv("REDIS_URL"); urlStr != "" {

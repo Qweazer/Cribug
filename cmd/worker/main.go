@@ -123,6 +123,22 @@ func main() {
 	toolActivities := activities.NewToolActivities()
 	w.RegisterActivityWithOptions(toolActivities.ExecuteTool, activity.RegisterOptions{Name: "ExecuteToolActivity"})
 
+	// Phase 6A Slice 17: MCP Tool Runtime
+	mcpActivities := activities.NewMCPActivities(dbClient, redisClient, nil)
+	w.RegisterActivityWithOptions(mcpActivities.RegisterMCPServer, activity.RegisterOptions{Name: "RegisterMCPServerActivity"})
+	w.RegisterActivityWithOptions(mcpActivities.DiscoverMCPTools, activity.RegisterOptions{Name: "DiscoverMCPToolsActivity"})
+	w.RegisterActivityWithOptions(mcpActivities.CallMCPTool, activity.RegisterOptions{Name: "CallMCPToolActivity"})
+	w.RegisterActivityWithOptions(mcpActivities.AuditMCPToolCall, activity.RegisterOptions{Name: "AuditMCPToolCallActivity"})
+	w.RegisterActivityWithOptions(mcpActivities.WorkspaceAppend, activity.RegisterOptions{Name: "WorkspaceAppendActivity"})
+
+	mcpWorkflow := workflows.NewMCPToolCallWorkflow()
+	w.RegisterWorkflowWithOptions(mcpWorkflow.Execute, workflow.RegisterOptions{Name: workflows.MCPToolCallWorkflowName})
+
+	// Ensure MCP tables exist
+	if err := activities.EnsureMCPTables(dbClient.Stdlib()); err != nil {
+		log.Printf("[WARN] Failed to ensure MCP tables: %v", err)
+	}
+
 	log.Printf("worker started, task_queue=%s", cfg.TemporalTaskQueue)
 	if err := w.Run(worker.InterruptCh()); err != nil {
 		log.Fatalf("worker error: %v", err)

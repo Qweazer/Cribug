@@ -26,6 +26,14 @@ func NewRouter(h *Handler) *chi.Mux {
 		r.Get("/tasks/{id}", h.getTask)
 		r.Get("/tasks/{id}/dag", h.getDAG)
 		r.Get("/stream/sse", h.streamTaskEvents)
+
+		// Phase 6A: MCP Tool Runtime
+		mcpH := NewMCPHandler(h.db)
+		r.Post("/mcp/servers", mcpH.registerServer)
+		r.Get("/mcp/servers", mcpH.listServers)
+		r.Get("/mcp/servers/{server_id}", mcpH.getServer)
+		r.Get("/mcp/servers/{server_id}/tools", mcpH.listTools)
+		r.Post("/mcp/tools/{tool_id}/call", mcpH.callTool)
 	})
 
 	return r
