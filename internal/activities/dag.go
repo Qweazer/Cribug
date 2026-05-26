@@ -107,7 +107,7 @@ func (a *DAGActivities) PlanDAG(ctx context.Context, input PlanDAGInput) (*PlanD
 	logger := activity.GetLogger(ctx)
 	logger.Info("PlanDAGActivity started", "task_id", input.TaskID)
 
-	// Generate 7-node DAG for visualization and replan testing:
+	// Generate 10-node DAG for visualization, replan, and concurrency testing:
 	// Layer 0: research (no deps)
 	// Layer 0: analyze (no deps)
 	// Layer 1: compare (depends on research, analyze)
@@ -158,6 +158,30 @@ func (a *DAGActivities) PlanDAG(ctx context.Context, input PlanDAGInput) (*PlanD
 					DependsOn: []string{"analyze"},
 					UseLLM:    false,
 				},
+				{
+					ID:        "extra1",
+					Type:      "mock",
+					Name:      "Extra Node 1",
+					Input:     "Extra mock node for concurrency testing",
+					DependsOn: []string{"research", "analyze"},
+					UseLLM:    false,
+				},
+				{
+					ID:        "extra2",
+					Type:      "mock",
+					Name:      "Extra Node 2",
+					Input:     "Extra mock node for concurrency testing",
+					DependsOn: []string{"research", "analyze"},
+					UseLLM:    false,
+				},
+				{
+					ID:        "extra3",
+					Type:      "mock",
+					Name:      "Extra Node 3",
+					Input:     "Extra mock node for concurrency testing",
+					DependsOn: []string{"research", "analyze"},
+					UseLLM:    false,
+				},
 			{
 				ID:        "draft",
 				Type:      "synthesis",
@@ -182,6 +206,12 @@ func (a *DAGActivities) PlanDAG(ctx context.Context, input PlanDAGInput) (*PlanD
 			{From: "analyze", To: "compare"},
 			{From: "analyze", To: "validate"},
 				{From: "analyze", To: "conclude"},
+				{From: "research", To: "extra1"},
+				{From: "analyze", To: "extra1"},
+				{From: "research", To: "extra2"},
+				{From: "analyze", To: "extra2"},
+				{From: "research", To: "extra3"},
+				{From: "analyze", To: "extra3"},
 			{From: "compare", To: "draft"},
 			{From: "validate", To: "draft"},
 			{From: "draft", To: "review"},

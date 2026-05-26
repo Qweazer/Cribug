@@ -190,17 +190,21 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 
 	// 2. Execute each layer concurrently
 	for layerIdx, layer := range nodeLayers {
-		layerFutures := make(map[string]workflow.Future)
+		batchFutures := make(map[string]workflow.Future)
 
 		logger.Info("Executing DAG node layer", "layer_size", len(layer))
-			if len(layer) > peakParallel { peakParallel = len(layer) }
-			workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
-				TaskID: req.TaskID,
-				Event: events.NewDAGConcurrencyLimitAppliedEvent(req.TaskID, req.WorkflowID, maxParallel, len(layer), peakParallel),
-			}).Get(ctx, nil)
-
-		// Start all nodes in this layer concurrently
-		for _, node := range layer {
+			allLayerNodes := make([]types.DAGNode, 0, len(layer))
+			for _, n := range layer { allLayerNodes = append(allLayerNodes, n) }
+			for bi := 0; bi < len(allLayerNodes); bi += maxParallel {
+				ei := bi + maxParallel; if ei > len(allLayerNodes) { ei = len(allLayerNodes) }
+				batch := allLayerNodes[bi:ei]
+				batchFutures = make(map[string]workflow.Future)
+				batchSize := len(batch); if batchSize > peakParallel { peakParallel = batchSize }
+				workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+					TaskID: req.TaskID,
+					Event: events.NewDAGConcurrencyLimitAppliedEvent(req.TaskID, req.WorkflowID, maxParallel, batchSize, peakParallel),
+				}).Get(ctx, nil)
+				for _, node := range batch {
 			logger.Info("Executing DAG node", "node_id", node.ID, "use_llm", node.UseLLM)
 
 				// Check if this node should be skipped (upstream dependency failed/skipped)
@@ -411,10 +415,10 @@ Output your answer directly:`, req.Query, upstreamContext, node.Name, node.Type)
 						}).Get(ctx, nil)
 					}
 				}
-				// ReAct nodes are handled synchronously (no Future in layerFutures)
+				// ReAct nodes are handled synchronously (no Future in batchFutures)
 			} else {
 				// Regular node: call ExecuteDAGNodeActivity
-				layerFutures[node.ID] = workflow.ExecuteActivity(ctx, "ExecuteDAGNodeActivity", activities.ExecuteDAGNodeInput{
+				batchFutures[node.ID] = workflow.ExecuteActivity(ctx, "ExecuteDAGNodeActivity", activities.ExecuteDAGNodeInput{
 					TaskID:          req.TaskID,
 					WorkflowID:      req.WorkflowID,
 					RunID:           req.RunID,
@@ -434,7 +438,7 @@ Output your answer directly:`, req.Query, upstreamContext, node.Name, node.Type)
 		}
 
 		// Wait for all nodes in this layer to complete
-		for nodeID, future := range layerFutures {
+		for nodeID, future := range batchFutures {
 			// Try to get as DAG node result first
 			var dagOutput *activities.ExecuteDAGNodeOutput
 			err := future.Get(ctx, &dagOutput)
@@ -560,6 +564,7 @@ Output your answer directly:`, req.Query, upstreamContext, node.Name, node.Type)
 				}).Get(ctx, nil)
 			}
 		}
+			}
 	}
 
 	// 12. SynthesisActivity
