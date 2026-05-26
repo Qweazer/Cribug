@@ -485,6 +485,36 @@ Phase 4 known limitations:
 - Strictly guarantees peak ≤ max_parallel_agents; not maximally efficient across layers
 - Future optimization: cross-layer ready-node scheduling
 
+## Phase 5: Swarm Architecture + Agent P2P + Workspace
+
+| Slice | Status | Description |
+|-------|--------|-------------|
+| Slice 10 | ✅ | Lead Agent / SwarmWorkflow — Selector+Timer, 3 concurrent workers |
+| Slice 11 | ✅ | Agent P2P Communication — deterministic message routing, inbox/outbox, multi-round |
+| Slice 12 | Future | Workspace Append/List |
+| Slice 13 | Future | Agent Handoff |
+
+### Phase 5A Slice 10: Lead Agent / SwarmWorkflow
+
+- SwarmWorkflow with `workflow.NewSelector` + `selector.AddFuture` + `workflow.NewTimer`
+- 3 concurrent WorkerAgentActivity executions, aggregated results
+- Events: SWARM_STARTED, WORKER_ASSIGNED/STARTED/COMPLETED/FAILED/TIMEOUT, SWARM_COMPLETED/FAILED
+
+### Phase 5B Slice 11: Agent P2P Communication
+
+- `AgentMessage` model: message_id, from/to_agent, message_type, status, round
+- Message types: request/response/critique/observation/final/error
+- Multi-round deterministic routing: round 1 outbound → round 2 inbox
+- Invalid recipients → `dropped` status; `max_p2p_rounds` prevents infinite loops
+- P2P events: AGENT_MESSAGE_CREATED/ROUTED/DELIVERED/FAILED/DROPPED, P2P_ROUND_STARTED/COMPLETED
+- `P2PSummary` in workflow result: total/routed/delivered/failed/dropped messages
+
+Testing:
+```bash
+bash scripts/test_swarm_workflow_smoke.sh   # Phase 5A
+bash scripts/test_swarm_p2p_smoke.sh        # Phase 5B
+```
+
 ## What We DON'T Do (Yet)
 
 This MVP does NOT currently include:

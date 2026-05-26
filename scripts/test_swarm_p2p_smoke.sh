@@ -47,12 +47,12 @@ log "  P2P swarm completed: PASSED"
 log "Test 3: P2P events"
 sleep 1
 EVENTS=$(redis_cmd XRANGE "task:$TID:events" - + 2>/dev/null || echo "")
-[ $(echo "$EVENTS" | grep -c "\1" | tr -d " " || echo 0) -ge 1 ] || fail "P2P_ROUND_STARTED missing"
-[ $(echo "$EVENTS" | grep -c "\1" | tr -d " " || echo 0) -ge 1 ] || fail "P2P_ROUND_COMPLETED missing"
-[ $(echo "$EVENTS" | grep -c "\1" | tr -d " " || echo 0) -ge 1 ] || fail "AGENT_MESSAGE_CREATED missing"
-[ $(echo "$EVENTS" | grep -c "\1" | tr -d " " || echo 0) -ge 1 ] || fail "AGENT_MESSAGE_ROUTED missing"
-[ $(echo "$EVENTS" | grep -c "\1" | tr -d " " || echo 0) -ge 1 ] || fail "AGENT_MESSAGE_DELIVERED missing"
-[ $(echo "$EVENTS" | grep -c "\1" | tr -d " " || echo 0) -ge 1 ] || fail "SWARM_COMPLETED missing (Phase 5A preserved)"
+R1=$(echo "$EVENTS" | grep -c "P2P_ROUND_STARTED" 2>/dev/null); R1=${R1##*$'\n'}; R1=${R1// /}; [ "${R1:-0}" -ge 1 ] || fail "P2P_ROUND_STARTED missing"
+R2=$(echo "$EVENTS" | grep -c "P2P_ROUND_COMPLETED" 2>/dev/null); R2=${R2##*$'\n'}; R2=${R2// /}; [ "${R2:-0}" -ge 1 ] || fail "P2P_ROUND_COMPLETED missing"
+M1=$(echo "$EVENTS" | grep -c "AGENT_MESSAGE_CREATED" 2>/dev/null); M1=${M1##*$'\n'}; M1=${M1// /}; [ "${M1:-0}" -ge 1 ] || fail "AGENT_MESSAGE_CREATED missing"
+M2=$(echo "$EVENTS" | grep -c "AGENT_MESSAGE_ROUTED" 2>/dev/null); M2=${M2##*$'\n'}; M2=${M2// /}; [ "${M2:-0}" -ge 1 ] || fail "AGENT_MESSAGE_ROUTED missing"
+M3=$(echo "$EVENTS" | grep -c "AGENT_MESSAGE_DELIVERED" 2>/dev/null); M3=${M3##*$'\n'}; M3=${M3// /}; [ "${M3:-0}" -ge 1 ] || fail "AGENT_MESSAGE_DELIVERED missing"
+S1=$(echo "$EVENTS" | grep -c "SWARM_COMPLETED" 2>/dev/null); S1=${S1##*$'\n'}; S1=${S1// /}; [ "${S1:-0}" -ge 1 ] || fail "SWARM_COMPLETED missing"
 log "  P2P events present: PASSED"
 
 # ── Test 4: Phase 5A events still work ──────────────────────────
