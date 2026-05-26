@@ -51,6 +51,14 @@ const (
 	EventTypeWorkerTimeout  = "WORKER_TIMEOUT"
 	EventTypeSwarmCompleted = "SWARM_COMPLETED"
 	EventTypeSwarmFailed    = "SWARM_FAILED"
+	// P2P Communication events (Phase 5B Slice 11)
+	EventTypeAgentMessageCreated   = "AGENT_MESSAGE_CREATED"
+	EventTypeAgentMessageRouted    = "AGENT_MESSAGE_ROUTED"
+	EventTypeAgentMessageDelivered = "AGENT_MESSAGE_DELIVERED"
+	EventTypeAgentMessageFailed    = "AGENT_MESSAGE_FAILED"
+	EventTypeAgentMessageDropped   = "AGENT_MESSAGE_DROPPED"
+	EventTypeP2PRoundStarted       = "P2P_ROUND_STARTED"
+	EventTypeP2PRoundCompleted     = "P2P_ROUND_COMPLETED"
 )
 
 type AgentEvent struct {
@@ -486,6 +494,62 @@ func NewSwarmCompletedEvent(taskID, workflowID string, succeeded, failed, timeou
 func NewSwarmFailedEvent(taskID, workflowID, errorMsg string) AgentEvent {
 	return NewAgentEvent(EventTypeSwarmFailed, map[string]interface{}{
 		"task_id": taskID, "workflow_id": workflowID, "error": errorMsg,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// P2P Communication events (Phase 5B Slice 11)
+
+func NewAgentMessageCreatedEvent(taskID, workflowID, messageID, fromAgent, toAgent, msgType string, round int) AgentEvent {
+	return NewAgentEvent(EventTypeAgentMessageCreated, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID, "message_id": messageID,
+		"from_agent_id": fromAgent, "to_agent_id": toAgent, "message_type": msgType, "round": round,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewAgentMessageRoutedEvent(taskID, workflowID, messageID, fromAgent, toAgent string, round int) AgentEvent {
+	return NewAgentEvent(EventTypeAgentMessageRouted, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID, "message_id": messageID,
+		"from_agent_id": fromAgent, "to_agent_id": toAgent, "round": round,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewAgentMessageDeliveredEvent(taskID, workflowID, messageID, fromAgent, toAgent string, round int) AgentEvent {
+	return NewAgentEvent(EventTypeAgentMessageDelivered, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID, "message_id": messageID,
+		"from_agent_id": fromAgent, "to_agent_id": toAgent, "round": round,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewAgentMessageFailedEvent(taskID, workflowID, messageID, fromAgent, toAgent string, round int) AgentEvent {
+	return NewAgentEvent(EventTypeAgentMessageFailed, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID, "message_id": messageID,
+		"from_agent_id": fromAgent, "to_agent_id": toAgent, "round": round,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewAgentMessageDroppedEvent(taskID, workflowID, messageID, fromAgent, toAgent string, round int) AgentEvent {
+	return NewAgentEvent(EventTypeAgentMessageDropped, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID, "message_id": messageID,
+		"from_agent_id": fromAgent, "to_agent_id": toAgent, "round": round,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewP2PRoundStartedEvent(taskID, workflowID string, round, workerCount int) AgentEvent {
+	return NewAgentEvent(EventTypeP2PRoundStarted, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID, "round": round, "worker_count": workerCount,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewP2PRoundCompletedEvent(taskID, workflowID string, round, messages int) AgentEvent {
+	return NewAgentEvent(EventTypeP2PRoundCompleted, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID, "round": round, "total_messages": messages,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	})
 }

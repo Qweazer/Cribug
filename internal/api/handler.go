@@ -143,6 +143,7 @@ func (h *Handler) createTask(w http.ResponseWriter, r *http.Request) {
 			TaskID: taskID, WorkflowID: workflowID, RunID: "",
 			Query: req.Query, Model: model, Temperature: temperature,
 			MaxTokens: maxCompletionTokens, WorkerCount: workerCount, WorkerTimeout: workerTimeout,
+				MaxP2PRounds: 2,
 		}
 		wfRun, err = h.temporal.ExecuteWorkflow(ctx, startOpts, workflowName, swarmInput)
 	} else {

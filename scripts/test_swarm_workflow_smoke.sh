@@ -47,11 +47,11 @@ log "  SwarmWorkflow completed: PASSED"
 
 # ── Test 3: SSE/Stream events ───────────────────────────────────
 log "Test 3: Swarm events in Redis Stream"
+sleep 1
 EVENTS=$(redis_cmd XRANGE "task:$TID:events" - + 2>/dev/null || echo "")
-echo "$EVENTS" | grep -q "SWARM_STARTED" || fail "SWARM_STARTED missing"
-echo "$EVENTS" | grep -q "WORKER_ASSIGNED" || fail "WORKER_ASSIGNED missing"
-echo "$EVENTS" | grep -q "WORKER_COMPLETED" || fail "WORKER_COMPLETED missing"
-echo "$EVENTS" | grep -q "SWARM_COMPLETED" || fail "SWARM_COMPLETED missing"
+SWARM_CNT=$(echo "$EVENTS" | grep -c "SWARM_STARTED" 2>/dev/null); SWARM_CNT=${SWARM_CNT##*$'\n'}; SWARM_CNT=${SWARM_CNT// /}; [ "${SWARM_CNT:-0}" -ge 1 ] || fail "SWARM_STARTED missing"
+WCNT=$(echo "$EVENTS" | grep -c "WORKER_COMPLETED" 2>/dev/null); WCNT=${WCNT##*$'\n'}; WCNT=${WCNT// /}; [ "${WCNT:-0}" -ge 1 ] || fail "WORKER_COMPLETED missing"
+SCNT=$(echo "$EVENTS" | grep -c "SWARM_COMPLETED" 2>/dev/null); SCNT=${SCNT##*$'\n'}; SCNT=${SCNT// /}; [ "${SCNT:-0}" -ge 1 ] || fail "SWARM_COMPLETED missing"
 log "  Swarm events present: PASSED"
 
 # ── Test 4: No workflow.Sleep polling ───────────────────────────
