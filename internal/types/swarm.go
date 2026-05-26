@@ -197,6 +197,29 @@ type MailboxResponse struct {
 	P2PMessages    int    `json:"p2p_messages"`
 }
 
+// ── Security & Access Control (Phase 5F) ──────────────────────
+
+type AgentAuthInput struct {
+	WorkflowID string `json:"workflow_id"`
+	AgentID    string `json:"agent_id"`
+	AgentRole  string `json:"agent_role"` // "lead" | "worker"
+	Action     string `json:"action"`     // "execute_task" | "send_message" | "modify_workspace"
+}
+
+type TeamActionInput struct {
+	WorkflowID  string `json:"workflow_id"`
+	AgentID     string `json:"agent_id"`
+	AgentRole   string `json:"agent_role"`
+	Action      string `json:"action"`
+	TargetAgent string `json:"target_agent,omitempty"`
+	Resource    string `json:"resource,omitempty"`
+}
+
+type TeamActionDecision struct {
+	Allowed bool   `json:"allowed"`
+	Reason  string `json:"reason,omitempty"`
+}
+
 // ── Status Constants ────────────────────────────────────────────
 
 const (

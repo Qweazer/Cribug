@@ -161,6 +161,17 @@ func (sw *SwarmWorkflow) Execute(ctx workflow.Context, req types.SwarmWorkflowIn
 				Event:  events.NewWorkerStartedEvent(req.TaskID, req.WorkflowID, w.AgentID, w.Role),
 			}).Get(ctx, nil)
 
+			// Authorize worker action before launch (Phase 5F)
+			authDecision := &types.TeamActionDecision{}
+			_ = workflow.ExecuteActivity(ctx, "AuthorizeTeamActionActivity", types.TeamActionInput{
+				WorkflowID: req.WorkflowID, AgentID: w.AgentID, AgentRole: w.Role,
+				Action: "execute_task",
+			}).Get(ctx, authDecision)
+			if authDecision != nil && !authDecision.Allowed {
+				logger.Warn("Worker unauthorized, skipping", "agent_id", w.AgentID, "reason", authDecision.Reason)
+				continue
+			}
+
 			roundFutures[w.AgentID] = workflow.ExecuteActivity(ctx, "WorkerAgentActivity", types.WorkerAgentInput{
 				TaskID:     req.TaskID, WorkflowID: req.WorkflowID, RunID: req.RunID,
 				AgentID:    w.AgentID, Role: w.Role, Task: w.Task,

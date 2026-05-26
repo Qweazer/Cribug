@@ -112,6 +112,7 @@ func main() {
 
 	// Phase 5A Slice 10: Swarm Workflow
 	swarmActivities := activities.NewSwarmActivities(cfg.LLMServiceURL)
+	w.RegisterActivityWithOptions(swarmActivities.AuthorizeTeamAction, activity.RegisterOptions{Name: "AuthorizeTeamActionActivity"})
 	w.RegisterActivityWithOptions(swarmActivities.WorkerAgent, activity.RegisterOptions{Name: "WorkerAgentActivity"})
 
 	// Phase 4D Slice 13: DAG Dynamic Replanning

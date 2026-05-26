@@ -174,6 +174,31 @@ func abbreviate(s string, n int) string {
 	return s[:n] + "..."
 }
 
+// AuthorizeTeamAction enforces role-based access control (Phase 5F)
+func (a *SwarmActivities) AuthorizeTeamAction(ctx context.Context, input types.TeamActionInput) (*types.TeamActionDecision, error) {
+	logger := activity.GetLogger(ctx)
+	logger.Info("AuthorizeTeamAction", "agent", input.AgentID, "role", input.AgentRole, "action", input.Action)
+
+	allowed := false
+	reason := ""
+
+	switch input.AgentRole {
+	case "lead":
+		allowed = true
+	case "researcher", "analyst", "critic", "synthesizer", "reviewer":
+		switch input.Action {
+		case "execute_task", "send_message", "modify_workspace":
+			allowed = true
+		default:
+			reason = fmt.Sprintf("action '%s' not allowed for worker role '%s'", input.Action, input.AgentRole)
+		}
+	default:
+		reason = fmt.Sprintf("unknown role '%s'", input.AgentRole)
+	}
+
+	return &types.TeamActionDecision{Allowed: allowed, Reason: reason}, nil
+}
+
 func collectWorkspaceReads(input types.WorkerAgentInput) []string {
 	var ids []string
 	for _, w := range input.WorkspaceItems {
