@@ -424,7 +424,11 @@ Output your answer directly:`, req.Query, upstreamContext, node.Name, node.Type)
 					Model:           req.Model,
 					Temperature:     req.Temperature,
 					MaxTokens:       req.MaxCompletionTokens,
-					TestFailNodeID:  req.TestFailNodeID,
+					TestFailNodeID:       req.TestFailNodeID,
+					TestNodeDelayMs:       req.TestDAGNodeDelayMs,
+					TestNodeFailAttempts:  req.TestDAGNodeFailAttempts,
+					ForceFailedAfterLLM:   req.ForceFailedAfterLLM,
+					ReplaceOutputAfterLLM: req.ReplaceOutputAfterLLM,
 				})
 			}
 		}

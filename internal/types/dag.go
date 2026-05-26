@@ -40,6 +40,7 @@ type DAGNodeResult struct {
 	Output        string `json:"output"`
 	Error         string `json:"error,omitempty"`
 	SkippedReason string `json:"skipped_reason,omitempty"`
+	RawLLMOutput  string `json:"raw_llm_output,omitempty"` // captured when force_failed_after_llm
 }
 
 type DAGSynthesisResult struct {

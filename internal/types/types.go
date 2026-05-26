@@ -37,7 +37,9 @@ type TaskConfig struct {
 	ReActMaxIterations  *int     `json:"react_max_iterations,omitempty"`
 	TestFailNodeID      *string  `json:"test_fail_node_id,omitempty"` // Slice 13/14 test hook
 	TestDAGNodeDelayMs  *int     `json:"test_dag_node_delay_ms,omitempty"` // Slice 14: delay hook
-	TestDAGNodeFailAttempts *int `json:"test_dag_node_fail_attempts,omitempty"` // Slice 14: transient failure hook
+	TestDAGNodeFailAttempts   *int    `json:"test_dag_node_fail_attempts,omitempty"`
+	ForceFailedAfterLLM       *bool   `json:"force_failed_after_llm,omitempty"`   // Slice 14 hybrid: call LLM then fail
+	ReplaceOutputAfterLLM     *string `json:"replace_output_after_llm,omitempty"` // Slice 14 hybrid: call LLM, replace output
 }
 
 const (
@@ -162,6 +164,8 @@ type WorkflowTaskRequest struct {
 	TestFailNodeID          string `json:"test_fail_node_id,omitempty"`
 	TestDAGNodeDelayMs      int    `json:"test_dag_node_delay_ms,omitempty"`
 	TestDAGNodeFailAttempts int    `json:"test_dag_node_fail_attempts,omitempty"`
+	ForceFailedAfterLLM     bool   `json:"force_failed_after_llm,omitempty"`
+	ReplaceOutputAfterLLM   string `json:"replace_output_after_llm,omitempty"`
 
 	// ReactConfig is computed from EnableReAct + ReActMaxIterations
 	ReactConfig *ReactLoopConfig `json:"-"`

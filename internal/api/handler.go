@@ -105,6 +105,8 @@ func (h *Handler) createTask(w http.ResponseWriter, r *http.Request) {
 			TestFailNodeID:       getTestFailNodeID(req.Config),
 			TestDAGNodeDelayMs:   getIntField(req.Config, "delay_ms"),
 			TestDAGNodeFailAttempts: getIntField(req.Config, "fail_attempts"),
+				ForceFailedAfterLLM:     getBoolField(req.Config, "force_failed_after_llm"),
+				ReplaceOutputAfterLLM:   getStringField(req.Config, "replace_output_after_llm"),
 	}
 
 	if h.temporal == nil {
@@ -265,6 +267,30 @@ func getIntField(cfg *types.TaskConfig, field string) int {
 		}
 	}
 	return 0
+}
+
+func getBoolField(cfg *types.TaskConfig, field string) bool {
+	if cfg == nil {
+		return false
+	}
+	switch field {
+	case "force_failed_after_llm":
+		return cfg.ForceFailedAfterLLM != nil && *cfg.ForceFailedAfterLLM
+	}
+	return false
+}
+
+func getStringField(cfg *types.TaskConfig, field string) string {
+	if cfg == nil {
+		return ""
+	}
+	switch field {
+	case "replace_output_after_llm":
+		if cfg.ReplaceOutputAfterLLM != nil {
+			return *cfg.ReplaceOutputAfterLLM
+		}
+	}
+	return ""
 }
 
 func getTestFailNodeID(cfg *types.TaskConfig) string {

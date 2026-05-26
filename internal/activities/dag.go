@@ -209,6 +209,8 @@ type ExecuteDAGNodeInput struct {
 	TestFailNodeID          string // Slice 13: fail this node
 	TestNodeDelayMs          int    // Slice 14: delay execution by N ms
 	TestNodeFailAttempts     int    // Slice 14: fail first N attempts, succeed on N+1
+	ForceFailedAfterLLM      bool   // Slice 14 hybrid: call LLM, capture output, then fail
+	ReplaceOutputAfterLLM    string // Slice 14 hybrid: call LLM, replace output with this
 }
 
 type ExecuteDAGNodeOutput struct {
@@ -225,8 +227,7 @@ func (a *DAGActivities) ExecuteDAGNode(ctx context.Context, input ExecuteDAGNode
 		"use_llm", input.Node.UseLLM)
 
 	// Slice 13/14 test hooks
-	if input.TestFailNodeID != "" && input.Node.ID == input.TestFailNodeID {
-		// Slice 14: transient failure — fail first N attempts, succeed on N+1
+	if input.TestFailNodeID != "" && input.Node.ID == input.TestFailNodeID && !input.ForceFailedAfterLLM {
 		if input.TestNodeFailAttempts > 0 {
 			attempt := activity.GetInfo(ctx).Attempt
 			if attempt <= int32(input.TestNodeFailAttempts) {
