@@ -61,7 +61,7 @@ func (a *SwarmActivities) WorkerAgent(ctx context.Context, input types.WorkerAge
 	}
 
 	// Generate deterministic outbound messages based on role (Phase 5B)
-	outbound := generateOutboundMessages(input, resp.Content)
+	outbound, wsAppends := generateOutboundMessages(input, resp.Content)
 
 	logger.Info("WorkerAgentActivity completed",
 		"agent_id", input.AgentID, "role", input.Role,
@@ -79,15 +79,18 @@ func (a *SwarmActivities) WorkerAgent(ctx context.Context, input types.WorkerAge
 		OutboundMessages: outbound,
 		InboxCount:       len(input.InboxMessages),
 		OutboxCount:      len(outbound),
+				WorkspaceAppends:  wsAppends,
+				WorkspaceReads:    collectWorkspaceReads(input),
+				WorkspaceUsedIDs:  collectWorkspaceReads(input),
 	}, nil
 }
 
 // generateOutboundMessages creates deterministic P2P messages based on agent role.
 // This is a deterministic fixture — doesn't depend on LLM output precision.
-func generateOutboundMessages(input types.WorkerAgentInput, llmOutput string) []types.AgentMessage {
+func generateOutboundMessages(input types.WorkerAgentInput, llmOutput string) ([]types.AgentMessage, []types.WorkspaceItem) {
 	// Only generate outbound in round 1 (not recursive)
 	if input.Round != 0 {
-		return nil
+		return nil, nil
 	}
 
 	msgID := func(idx int) string {
@@ -95,9 +98,18 @@ func generateOutboundMessages(input types.WorkerAgentInput, llmOutput string) []
 	}
 
 	var out []types.AgentMessage
+	var ws []types.WorkspaceItem
 
 	switch input.Role {
 	case "researcher":
+	wi := types.WorkspaceItem{
+		ItemID: fmt.Sprintf("%s-ws-r%d-%s-1", input.WorkflowID, input.Round, input.AgentID),
+		WorkflowID: input.WorkflowID, TaskID: input.TaskID,
+		AgentID: input.AgentID, Role: input.Role, ItemType: types.WSTypeObservation,
+		Title: "Research Findings", Content: abbreviate(llmOutput, 300),
+		Round: input.Round, Status: types.WSStatusCreated,
+	}
+	ws = append(ws, wi)
 		out = append(out, types.AgentMessage{
 			MessageID: msgID(1), WorkflowID: input.WorkflowID, TaskID: input.TaskID,
 			FromAgentID: input.AgentID, ToAgentID: "worker-2", FromRole: "researcher", ToRole: "critic",
@@ -112,6 +124,17 @@ func generateOutboundMessages(input types.WorkerAgentInput, llmOutput string) []
 			Status: types.MsgStatusCreated, Round: input.Round,
 		})
 	case "critic":
+	wi := types.WorkspaceItem{
+		ItemID: fmt.Sprintf("%s-ws-r%d-%s-1", input.WorkflowID, input.Round, input.AgentID),
+		WorkflowID: input.WorkflowID, TaskID: input.TaskID,
+		AgentID: input.AgentID, Role: input.Role, ItemType: types.WSTypeCritique,
+		Title: "Critique", Content: abbreviate(llmOutput, 300),
+		Round: input.Round, Status: types.WSStatusCreated,
+	}
+	if len(input.WorkspaceItems) > 0 {
+		wi.ParentItemID = input.WorkspaceItems[0].ItemID
+	}
+	ws = append(ws, wi)
 		out = append(out, types.AgentMessage{
 			MessageID: msgID(1), WorkflowID: input.WorkflowID, TaskID: input.TaskID,
 			FromAgentID: input.AgentID, ToAgentID: "worker-3", FromRole: "critic", ToRole: "synthesizer",
@@ -119,6 +142,14 @@ func generateOutboundMessages(input types.WorkerAgentInput, llmOutput string) []
 			Status: types.MsgStatusCreated, Round: input.Round,
 		})
 	case "synthesizer":
+	wi := types.WorkspaceItem{
+		ItemID: fmt.Sprintf("%s-ws-r%d-%s-1", input.WorkflowID, input.Round, input.AgentID),
+		WorkflowID: input.WorkflowID, TaskID: input.TaskID,
+		AgentID: input.AgentID, Role: input.Role, ItemType: types.WSTypeFinal,
+		Title: "Final Synthesis", Content: abbreviate(llmOutput, 300),
+		Round: input.Round, Status: types.WSStatusCreated,
+	}
+	ws = append(ws, wi)
 		out = append(out, types.AgentMessage{
 			MessageID: msgID(1), WorkflowID: input.WorkflowID, TaskID: input.TaskID,
 			FromAgentID: input.AgentID, ToAgentID: "", FromRole: "synthesizer", ToRole: "lead",
@@ -133,7 +164,7 @@ func generateOutboundMessages(input types.WorkerAgentInput, llmOutput string) []
 			Status: types.MsgStatusCreated, Round: input.Round,
 		})
 	}
-	return out
+	return out, ws
 }
 
 func abbreviate(s string, n int) string {
@@ -141,4 +172,12 @@ func abbreviate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+func collectWorkspaceReads(input types.WorkerAgentInput) []string {
+	var ids []string
+	for _, w := range input.WorkspaceItems {
+		ids = append(ids, w.ItemID)
+	}
+	return ids
 }

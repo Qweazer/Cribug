@@ -59,6 +59,13 @@ const (
 	EventTypeAgentMessageDropped   = "AGENT_MESSAGE_DROPPED"
 	EventTypeP2PRoundStarted       = "P2P_ROUND_STARTED"
 	EventTypeP2PRoundCompleted     = "P2P_ROUND_COMPLETED"
+	// Workspace events (Phase 5C Slice 12)
+	EventTypeWorkspaceItemCreated     = "WORKSPACE_ITEM_CREATED"
+	EventTypeWorkspaceItemAppended    = "WORKSPACE_ITEM_APPENDED"
+	EventTypeWorkspaceItemRead        = "WORKSPACE_ITEM_READ"
+	EventTypeWorkspaceItemUsed        = "WORKSPACE_ITEM_USED"
+	EventTypeWorkspaceItemFailed      = "WORKSPACE_ITEM_FAILED"
+	EventTypeWorkspaceSummaryUpdated  = "WORKSPACE_SUMMARY_UPDATED"
 )
 
 type AgentEvent struct {
@@ -550,6 +557,56 @@ func NewP2PRoundStartedEvent(taskID, workflowID string, round, workerCount int) 
 func NewP2PRoundCompletedEvent(taskID, workflowID string, round, messages int) AgentEvent {
 	return NewAgentEvent(EventTypeP2PRoundCompleted, map[string]interface{}{
 		"task_id": taskID, "workflow_id": workflowID, "round": round, "total_messages": messages,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// Workspace events (Phase 5C Slice 12)
+
+func NewWorkspaceItemCreatedEvent(taskID, workflowID, itemID, agentID, role, itemType string, round int) AgentEvent {
+	return NewAgentEvent(EventTypeWorkspaceItemCreated, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID, "item_id": itemID,
+		"agent_id": agentID, "role": role, "item_type": itemType, "round": round,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewWorkspaceItemAppendedEvent(taskID, workflowID, itemID, agentID string, round int) AgentEvent {
+	return NewAgentEvent(EventTypeWorkspaceItemAppended, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID, "item_id": itemID,
+		"agent_id": agentID, "round": round,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewWorkspaceItemReadEvent(taskID, workflowID, itemID, agentID, role string, round int) AgentEvent {
+	return NewAgentEvent(EventTypeWorkspaceItemRead, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID, "item_id": itemID,
+		"agent_id": agentID, "role": role, "round": round,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewWorkspaceItemUsedEvent(taskID, workflowID, itemID, agentID string, round int) AgentEvent {
+	return NewAgentEvent(EventTypeWorkspaceItemUsed, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID, "item_id": itemID,
+		"agent_id": agentID, "round": round,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewWorkspaceItemFailedEvent(taskID, workflowID, itemID, agentID string, round int) AgentEvent {
+	return NewAgentEvent(EventTypeWorkspaceItemFailed, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID, "item_id": itemID,
+		"agent_id": agentID, "round": round,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewWorkspaceSummaryUpdatedEvent(taskID, workflowID string, totalItems, createdItems, readItems int) AgentEvent {
+	return NewAgentEvent(EventTypeWorkspaceSummaryUpdated, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID,
+		"total_items": totalItems, "created_items": createdItems, "read_items": readItems,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	})
 }

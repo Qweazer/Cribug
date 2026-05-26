@@ -71,6 +71,7 @@ func (sw *SwarmWorkflow) Execute(ctx workflow.Context, req types.SwarmWorkflowIn
 	// ── State ────────────────────────────────────────────────────
 	var allResults []types.WorkerAgentResult
 	var allMessages []types.AgentMessage
+	var workspaceItems []types.WorkspaceItem // Phase 5C
 	var succeeded, failed, timedOut, totalTokens int
 	var totalLatency int64
 
@@ -126,6 +127,8 @@ func (sw *SwarmWorkflow) Execute(ctx workflow.Context, req types.SwarmWorkflowIn
 				AgentID:    w.AgentID, Role: w.Role, Task: w.Task,
 				Model: req.Model, Temperature: req.Temperature, MaxTokens: req.MaxTokens,
 				InboxMessages: rt.inbox, Round: round,
+				WorkspaceItems: workspaceItems,
+				WorkspaceSummary: buildWorkspaceSummary(workspaceItems),
 			})
 		}
 
@@ -159,7 +162,23 @@ func (sw *SwarmWorkflow) Execute(ctx workflow.Context, req types.SwarmWorkflowIn
 					allResults = append(allResults, wr)
 					delete(roundFutures, agentID)
 
-					// Route outbound messages
+					// Collect workspace appends from this worker
+				for _, w := range wr.WorkspaceAppends {
+					w.Status = types.WSStatusAppended
+					workspaceItems = append(workspaceItems, w)
+					workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+						TaskID: req.TaskID,
+						Event:  events.NewWorkspaceItemCreatedEvent(req.TaskID, req.WorkflowID, w.ItemID, w.AgentID, w.Role, w.ItemType, round),
+					}).Get(ctx, nil)
+				}
+				for _, readID := range wr.WorkspaceReads {
+					workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+						TaskID: req.TaskID,
+						Event:  events.NewWorkspaceItemReadEvent(req.TaskID, req.WorkflowID, readID, wr.AgentID, wr.Role, round),
+					}).Get(ctx, nil)
+				}
+
+				// Route outbound messages
 					for _, msg := range wr.OutboundMessages {
 						msg.Status = types.MsgStatusCreated
 						msg.Round = round
@@ -225,6 +244,34 @@ func (sw *SwarmWorkflow) Execute(ctx workflow.Context, req types.SwarmWorkflowIn
 			Event:  events.NewP2PRoundCompletedEvent(req.TaskID, req.WorkflowID, round, len(allMessages)),
 		}).Get(ctx, nil)
 	}
+
+	// ── Compute Workspace summary ───────────────────────────────
+	var wsCreated, wsRead, wsUsed, wsFailed int
+	perAgent := make(map[string]int)
+	perType := make(map[string]int)
+	for _, w := range workspaceItems {
+		switch w.Status {
+		case types.WSStatusCreated, types.WSStatusAppended:
+			wsCreated++
+		case types.WSStatusRead:
+			wsRead++
+		case types.WSStatusUsed:
+			wsUsed++
+		case types.WSStatusFailed:
+			wsFailed++
+		}
+		perAgent[w.AgentID]++
+		perType[w.ItemType]++
+	}
+	wsSummary := &types.WorkspaceSummary{
+		TotalItems: len(workspaceItems), CreatedItems: wsCreated,
+		AppendedItems: wsCreated, ReadItems: wsRead, UsedItems: wsUsed, FailedItems: wsFailed,
+		Items: workspaceItems, PerAgentCount: perAgent, PerTypeCount: perType,
+	}
+	workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+		TaskID: req.TaskID,
+		Event:  events.NewWorkspaceSummaryUpdatedEvent(req.TaskID, req.WorkflowID, len(workspaceItems), wsCreated, wsRead),
+	}).Get(ctx, nil)
 
 	// ── Compute P2P summary ─────────────────────────────────────
 	var routed, delivered, dropped, msgFailed int
@@ -300,5 +347,26 @@ func (sw *SwarmWorkflow) Execute(ctx workflow.Context, req types.SwarmWorkflowIn
 		TotalWorkers: len(workers), Succeeded: succeeded, Failed: failed, Timeout: timedOut,
 		TotalTokens: totalTokens, TotalLatencyMs: totalLatency, FinalAnswer: finalAnswer,
 		WorkerResults: allResults, P2PSummary: p2p,
+		WorkspaceSummary: wsSummary,
 	}, nil
+}
+
+func buildWorkspaceSummary(items []types.WorkspaceItem) *types.WorkspaceSummary {
+	if len(items) == 0 {
+		return nil
+	}
+	var created int
+	perAgent := make(map[string]int)
+	perType := make(map[string]int)
+	for _, w := range items {
+		if w.Status == types.WSStatusCreated || w.Status == types.WSStatusAppended {
+			created++
+		}
+		perAgent[w.AgentID]++
+		perType[w.ItemType]++
+	}
+	return &types.WorkspaceSummary{
+		TotalItems: len(items), CreatedItems: created, AppendedItems: created,
+		Items: items, PerAgentCount: perAgent, PerTypeCount: perType,
+	}
 }
