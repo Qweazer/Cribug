@@ -491,8 +491,8 @@ Phase 4 known limitations:
 |-------|--------|-------------|
 | Slice 10 | ✅ | Lead Agent / SwarmWorkflow — Selector+Timer, 3 concurrent workers |
 | Slice 11 | ✅ | Agent P2P Communication — deterministic message routing, inbox/outbox, multi-round |
-| Slice 12 | Future | Workspace Append/List |
-| Slice 13 | Future | Agent Handoff |
+| Slice 12 | ✅ | Shared Workspace — WorkspaceItem CRUD, P2P+Workspace linkage, per-agent items |
+| Slice 13 | ✅ | State Synchronization — SignalChannel (GetSignalChannel+AddReceive), status_query response |
 
 ### Phase 5A Slice 10: Lead Agent / SwarmWorkflow
 
@@ -513,6 +513,27 @@ Testing:
 ```bash
 bash scripts/test_swarm_workflow_smoke.sh   # Phase 5A
 bash scripts/test_swarm_p2p_smoke.sh        # Phase 5B
+
+### Phase 5C Slice 12: Shared Workspace
+
+- WorkspaceItem model: item_id, agent_id, role, item_type, status
+- WorkerAgentActivity reads workspace context, generates workspace appends
+- SwarmWorkflow maintains deterministic in-memory workspace state across rounds
+- Workspace + P2P linkage: messages reference source_item_id, items reference source_message_id
+- Events: WORKSPACE_ITEM_CREATED/APPENDED/READ/USED/FAILED, WORKSPACE_SUMMARY_UPDATED
+
+### Phase 5D Slice 13: State Synchronization
+
+- MailboxMessage / MailboxResponse for SignalChannel-based state queries
+- workflow.GetSignalChannel("swarm_mailbox") + selector.AddReceive + zero-duration NewTimer
+- Non-blocking signal check at each round start (no Sleep polling)
+- status_query handler responds with current swarm state
+- Events: SIGNAL_RECEIVED, SIGNAL_RESPONDED
+
+Testing:
+```bash
+bash scripts/test_swarm_workspace_smoke.sh   # Phase 5C
+```
 ```
 
 ## What We DON'T Do (Yet)
