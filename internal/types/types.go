@@ -46,6 +46,7 @@ const (
 	WorkflowModeSimple     = "simple"
 	WorkflowModeDAG       = "dag"
 	WorkflowModeMultiAgent = "multi_agent"
+	WorkflowModeSwarm      = "swarm"
 )
 
 type CreateTaskRequest struct {

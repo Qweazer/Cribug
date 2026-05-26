@@ -61,6 +61,9 @@ func main() {
 	mw := workflows.NewMultiAgentWorkflow()
 	w.RegisterWorkflowWithOptions(mw.Execute, workflow.RegisterOptions{Name: workflows.MultiAgentWorkflowName})
 
+	swarmWf := workflows.NewSwarmWorkflow()
+	w.RegisterWorkflowWithOptions(swarmWf.Execute, workflow.RegisterOptions{Name: workflows.SwarmWorkflowName})
+
 	// Register all activities
 	w.RegisterActivityWithOptions(emitEventActivity.Execute, activity.RegisterOptions{Name: "EmitEventActivity"})
 	w.RegisterActivityWithOptions(taskActivities.SaveResult, activity.RegisterOptions{Name: "SaveResultActivity"})
@@ -106,6 +109,10 @@ func main() {
 	w.RegisterActivityWithOptions(reactObsActivities.RecordAgentMetrics, activity.RegisterOptions{Name: "RecordAgentMetricsActivity"})
 	w.RegisterActivityWithOptions(reactObsActivities.AggregateAgentMetrics, activity.RegisterOptions{Name: "AggregateAgentMetricsActivity"})
 	w.RegisterActivityWithOptions(reactObsActivities.EmitMetricsSummary, activity.RegisterOptions{Name: "EmitMetricsSummaryActivity"})
+
+	// Phase 5A Slice 10: Swarm Workflow
+	swarmActivities := activities.NewSwarmActivities(cfg.LLMServiceURL)
+	w.RegisterActivityWithOptions(swarmActivities.WorkerAgent, activity.RegisterOptions{Name: "WorkerAgentActivity"})
 
 	// Phase 4D Slice 13: DAG Dynamic Replanning
 	dagFallbackActivities := activities.NewDAGFallbackActivities(cfg.RedisAddr, cfg.RedisPass, cfg.RedisDB, cfg.DAGTTLSeconds)

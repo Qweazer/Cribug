@@ -123,6 +123,8 @@ func (h *Handler) createTask(w http.ResponseWriter, r *http.Request) {
 		workflowName = "DAGWorkflow"
 	} else if workflowMode == types.WorkflowModeMultiAgent {
 		workflowName = "MultiAgentWorkflow"
+	} else if workflowMode == types.WorkflowModeSwarm {
+		workflowName = "SwarmWorkflow"
 	}
 
 	startOpts := client.StartWorkflowOptions{
@@ -130,7 +132,22 @@ func (h *Handler) createTask(w http.ResponseWriter, r *http.Request) {
 		ID:        workflowID,
 	}
 
-	wfRun, err := h.temporal.ExecuteWorkflow(ctx, startOpts, workflowName, workflowReq)
+	var wfRun client.WorkflowRun
+	if workflowMode == types.WorkflowModeSwarm {
+		workerCount := 3
+		workerTimeout := 60
+		if req.Config != nil && req.Config.MaxParallelAgents != nil && *req.Config.MaxParallelAgents > 0 {
+			workerCount = *req.Config.MaxParallelAgents // reuse field for swarm worker count
+		}
+		swarmInput := types.SwarmWorkflowInput{
+			TaskID: taskID, WorkflowID: workflowID, RunID: "",
+			Query: req.Query, Model: model, Temperature: temperature,
+			MaxTokens: maxCompletionTokens, WorkerCount: workerCount, WorkerTimeout: workerTimeout,
+		}
+		wfRun, err = h.temporal.ExecuteWorkflow(ctx, startOpts, workflowName, swarmInput)
+	} else {
+		wfRun, err = h.temporal.ExecuteWorkflow(ctx, startOpts, workflowName, workflowReq)
+	}
 	if err != nil {
 		log.Printf("[ERROR] start workflow: %v", err)
 		h.db.UpdateTaskError(ctx, taskID, types.ErrorTypeWorkflowStart, err.Error())
@@ -189,8 +206,10 @@ func (h *Handler) validateTaskMode(cfg *types.TaskConfig) (string, error) {
 		if !h.cfg.EnableMultiAgent {
 			return "", fmt.Errorf("mode 'multi_agent' is not enabled: set ENABLE_MULTI_AGENT=true to enable")
 		}
+	case types.WorkflowModeSwarm:
+		// OK — swarm mode is always enabled (Phase 5A)
 	default:
-		return "", fmt.Errorf("invalid mode '%s': must be 'simple', 'dag', or 'multi_agent'", mode)
+		return "", fmt.Errorf("invalid mode '%s': must be 'simple', 'dag', 'multi_agent', or 'swarm'", mode)
 	}
 
 	// Validate enable_tools

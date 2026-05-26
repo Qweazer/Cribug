@@ -42,6 +42,15 @@ const (
 	// DAG Concurrency Control (Slice 14)
 	EventTypeDAGConcurrencyLimitApplied = "DAG_CONCURRENCY_LIMIT_APPLIED"
 	EventTypeDAGNodeRetrying            = "DAG_NODE_RETRYING"
+	// Swarm Workflow events (Phase 5A Slice 10)
+	EventTypeSwarmStarted   = "SWARM_STARTED"
+	EventTypeWorkerAssigned = "WORKER_ASSIGNED"
+	EventTypeWorkerStarted  = "WORKER_STARTED"
+	EventTypeWorkerCompleted = "WORKER_COMPLETED"
+	EventTypeWorkerFailed   = "WORKER_FAILED"
+	EventTypeWorkerTimeout  = "WORKER_TIMEOUT"
+	EventTypeSwarmCompleted = "SWARM_COMPLETED"
+	EventTypeSwarmFailed    = "SWARM_FAILED"
 )
 
 type AgentEvent struct {
@@ -418,6 +427,66 @@ func NewDAGNodeRetryingEvent(taskID, workflowID, nodeID string, attempt int32, e
 		"attempt":     attempt,
 		"error":       errorMsg,
 		"timestamp":   time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// Swarm Workflow events (Phase 5A Slice 10)
+
+func NewSwarmStartedEvent(taskID, workflowID string, workerCount int) AgentEvent {
+	return NewAgentEvent(EventTypeSwarmStarted, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID, "worker_count": workerCount,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewWorkerAssignedEvent(taskID, workflowID, agentID, role, task string) AgentEvent {
+	return NewAgentEvent(EventTypeWorkerAssigned, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID, "agent_id": agentID, "role": role, "task": task,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewWorkerStartedEvent(taskID, workflowID, agentID, role string) AgentEvent {
+	return NewAgentEvent(EventTypeWorkerStarted, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID, "agent_id": agentID, "role": role,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewWorkerCompletedEvent(taskID, workflowID, agentID, role, result string, tokens, latencyMs int) AgentEvent {
+	return NewAgentEvent(EventTypeWorkerCompleted, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID, "agent_id": agentID, "role": role,
+		"result_len": len(result), "total_tokens": tokens, "latency_ms": latencyMs,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewWorkerFailedEvent(taskID, workflowID, agentID, role, errorMsg string) AgentEvent {
+	return NewAgentEvent(EventTypeWorkerFailed, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID, "agent_id": agentID, "role": role,
+		"error": errorMsg, "timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewWorkerTimeoutEvent(taskID, workflowID, agentID, role string) AgentEvent {
+	return NewAgentEvent(EventTypeWorkerTimeout, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID, "agent_id": agentID, "role": role,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewSwarmCompletedEvent(taskID, workflowID string, succeeded, failed, timeout, totalTokens int) AgentEvent {
+	return NewAgentEvent(EventTypeSwarmCompleted, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID,
+		"succeeded": succeeded, "failed": failed, "timeout": timeout, "total_tokens": totalTokens,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func NewSwarmFailedEvent(taskID, workflowID, errorMsg string) AgentEvent {
+	return NewAgentEvent(EventTypeSwarmFailed, map[string]interface{}{
+		"task_id": taskID, "workflow_id": workflowID, "error": errorMsg,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	})
 }
 
