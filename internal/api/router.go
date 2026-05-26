@@ -34,6 +34,11 @@ func NewRouter(h *Handler) *chi.Mux {
 		r.Get("/mcp/servers/{server_id}", mcpH.getServer)
 		r.Get("/mcp/servers/{server_id}/tools", mcpH.listTools)
 		r.Post("/mcp/tools/{tool_id}/call", mcpH.callTool)
+
+		// Phase 6B: Sandbox Runtime
+		sandboxH := NewSandboxHandler(h.db)
+		r.Post("/sandbox/execute", sandboxH.execute)
+		r.Get("/sandbox/audit", sandboxH.listAudit)
 	})
 
 	return r

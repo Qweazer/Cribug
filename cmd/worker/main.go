@@ -139,6 +139,19 @@ func main() {
 		log.Printf("[WARN] Failed to ensure MCP tables: %v", err)
 	}
 
+		// Phase 6B Slice 18: Sandbox Runtime
+		sandboxActivities := activities.NewSandboxActivities(dbClient, redisClient, nil)
+		w.RegisterActivityWithOptions(sandboxActivities.ExecuteSandbox, activity.RegisterOptions{Name: "ExecuteSandboxActivity"})
+		w.RegisterActivityWithOptions(sandboxActivities.AuditSandbox, activity.RegisterOptions{Name: "AuditSandboxActivity"})
+		w.RegisterActivityWithOptions(sandboxActivities.WorkspaceAppendForSandbox, activity.RegisterOptions{Name: "SandboxWorkspaceAppendActivity"})
+
+		sandboxWf := workflows.NewSandboxWorkflow()
+		w.RegisterWorkflowWithOptions(sandboxWf.Execute, workflow.RegisterOptions{Name: workflows.SandboxWorkflowName})
+
+		if err := activities.EnsureSandboxTables(dbClient.Stdlib()); err != nil {
+			log.Printf("[WARN] Failed to ensure sandbox tables: %v", err)
+		}
+
 	log.Printf("worker started, task_queue=%s", cfg.TemporalTaskQueue)
 	if err := w.Run(worker.InterruptCh()); err != nil {
 		log.Fatalf("worker error: %v", err)

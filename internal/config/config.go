@@ -33,6 +33,12 @@ type Config struct {
 	EnableMCP               bool
 	MCPDefaultTimeoutSec    int
 	MCPResultSizeLimitBytes int
+
+	// Sandbox Runtime (Phase 6B Slice 18)
+	EnableSandbox          bool
+	SandboxRunnerPath      string
+	SandboxDefaultTimeout  int
+	SandboxDefaultMemoryMB int
 }
 
 func Load() *Config {
@@ -63,6 +69,12 @@ func Load() *Config {
 		EnableMCP:               getEnvAsBool("ENABLE_MCP", false),
 		MCPDefaultTimeoutSec:    getEnvAsInt("MCP_DEFAULT_TIMEOUT_SEC", 30),
 		MCPResultSizeLimitBytes: getEnvAsInt("MCP_RESULT_SIZE_LIMIT_BYTES", 65536),
+
+		// Sandbox Runtime (Phase 6B Slice 18)
+		EnableSandbox:          getEnvAsBool("ENABLE_SANDBOX", false),
+		SandboxRunnerPath:      getEnv("SANDBOX_RUNNER_PATH", "./sandbox/runner/target/release/sandbox-runner"),
+		SandboxDefaultTimeout:  getEnvAsInt("SANDBOX_DEFAULT_TIMEOUT_SEC", 30),
+		SandboxDefaultMemoryMB: getEnvAsInt("SANDBOX_DEFAULT_MEMORY_MB", 128),
 	}
 
 	if urlStr := os.Getenv("REDIS_URL"); urlStr != "" {
