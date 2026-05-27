@@ -2,20 +2,26 @@ package activities
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"cribug/internal/db"
+	"cribug/internal/events"
+	redisclient "cribug/internal/redis"
 	"cribug/internal/skillclient"
+
+	"github.com/google/uuid"
 )
 
 // SkillActivities handles skill-related Temporal activities
 type SkillActivities struct {
 	client *skillclient.Client
 	db     *db.Postgres
+	redis  *redisclient.Client
 }
 
-func NewSkillActivities(client *skillclient.Client, database *db.Postgres) *SkillActivities {
-	return &SkillActivities{client: client, db: database}
+func NewSkillActivities(client *skillclient.Client, database *db.Postgres, redisClient *redisclient.Client) *SkillActivities {
+	return &SkillActivities{client: client, db: database, redis: redisClient}
 }
 
 // --- Input/Output Types ---
@@ -65,6 +71,7 @@ type AuditSkillInput struct {
 type AuditSkillOutput struct{ AuditID string }
 
 type WorkspaceAppendInput struct {
+	TaskID     string
 	WorkflowID string
 	AgentID    string
 	SkillName  string
@@ -165,6 +172,31 @@ func (a *SkillActivities) AuditSkillExecutionActivity(ctx context.Context, input
 }
 
 func (a *SkillActivities) WorkspaceAppendSkillResultActivity(ctx context.Context, input WorkspaceAppendInput) (WorkspaceAppendOutput, error) {
-	itemID := fmt.Sprintf("skill-%s-%s", input.SkillName, input.RequestID)
+	itemID := uuid.New().String()
+
+	// Serialize result, truncate oversized payloads
+	content, _ := json.Marshal(input.Result)
+	const maxContentBytes = 65536
+	if len(content) > maxContentBytes {
+		content = content[:maxContentBytes]
+	}
+
+	// Build workspace event and append to Redis stream
+	evt := events.NewAgentEvent("WORKSPACE_SKILL_RESULT", map[string]interface{}{
+		"task_id":     input.TaskID,
+		"workflow_id": input.WorkflowID,
+		"item_id":     itemID,
+		"agent_id":    input.AgentID,
+		"skill_name":  input.SkillName,
+		"request_id":  input.RequestID,
+		"success":     input.Success,
+		"content":     string(content),
+		"timestamp":   "now",
+	})
+
+	if a.redis != nil {
+		a.redis.AppendTaskEvent(ctx, input.TaskID, evt)
+	}
+
 	return WorkspaceAppendOutput{ItemID: itemID}, nil
 }

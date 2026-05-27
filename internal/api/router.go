@@ -39,6 +39,13 @@ func NewRouter(h *Handler) *chi.Mux {
 		sandboxH := NewSandboxHandler(h.db)
 		r.Post("/sandbox/execute", sandboxH.execute)
 		r.Get("/sandbox/audit", sandboxH.listAudit)
+
+		// Phase 6C: Skills System
+		skillsH := NewSkillsHandler(h.skillClient, h.skillActivities)
+		r.Get("/skills", skillsH.listSkills)
+		r.Get("/skills/{skill_name}", skillsH.getSkill)
+		r.Post("/skills/{skill_name}/execute", skillsH.executeSkill)
+		r.Get("/skills/audit", skillsH.getAudit)
 	})
 
 	return r

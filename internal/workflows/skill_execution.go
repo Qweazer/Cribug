@@ -12,6 +12,7 @@ import (
 type SkillExecutionWorkflowInput struct {
 	SkillName  string
 	Parameters map[string]interface{}
+	TaskID     string
 	AgentID    string
 	WorkflowID string
 	RequestID  string

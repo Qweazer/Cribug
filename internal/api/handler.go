@@ -14,6 +14,7 @@ import (
 	"cribug/internal/db"
 	"cribug/internal/events"
 	redisclient "cribug/internal/redis"
+	"cribug/internal/skillclient"
 	"cribug/internal/types"
 
 	"github.com/go-chi/chi/v5"
@@ -22,18 +23,24 @@ import (
 )
 
 type Handler struct {
-	db      *db.Postgres
-	redis   *redisclient.Client
-	temporal client.Client
-	cfg     *config.Config
+	db              *db.Postgres
+	redis           *redisclient.Client
+	temporal        client.Client
+	cfg             *config.Config
+	skillClient     *skillclient.Client
+	skillActivities *activities.SkillActivities
 }
 
 func NewHandler(database *db.Postgres, redisClient *redisclient.Client, temporalClient client.Client, cfg *config.Config) *Handler {
+	skillClient := skillclient.NewClient(cfg.LLMServiceURL)
+	skillActs := activities.NewSkillActivities(skillClient, database, redisClient)
 	return &Handler{
-		db:      database,
-		redis:   redisClient,
-		temporal: temporalClient,
-		cfg:     cfg,
+		db:              database,
+		redis:           redisClient,
+		temporal:        temporalClient,
+		cfg:             cfg,
+		skillClient:     skillClient,
+		skillActivities: skillActs,
 	}
 }
 
