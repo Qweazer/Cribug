@@ -26,6 +26,10 @@ def get_encoding(model: str):
 
 app = FastAPI()
 
+# Phase 6C: Skills System
+from llm_service.api.skills import router as skills_router
+app.include_router(skills_router)
+
 # Build real LLM client from env vars (falls back to mock if no API key)
 _real_client = build_client()
 

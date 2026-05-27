@@ -26,7 +26,7 @@ class SafeMathTool(Tool):
             risk_level="low",
             side_effects=False,
             timeout_seconds=10,
-            rate_limit=100,
+            rate_limit=None,
             cost_per_use=0.0,
             requires_auth=False,
             sandboxed=True,

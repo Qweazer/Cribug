@@ -171,6 +171,8 @@ class Tool(ABC):
 
     def __init__(self):
         """Initialize the tool."""
+        self.metadata = self._get_metadata()
+        self.parameters = self._get_parameters()
         self._last_execution_time: Optional[float] = None
 
     @abstractmethod
