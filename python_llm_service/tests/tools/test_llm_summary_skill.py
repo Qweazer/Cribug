@@ -1,0 +1,44 @@
+"""Tests for llm_summary_skill"""
+import asyncio
+import pytest
+from llm_service.tools.builtin.llm_summary_skill import LLMSummaryTool
+
+
+class TestLLMSummaryTool:
+    def setup_method(self):
+        self.tool = LLMSummaryTool()
+
+    def test_get_metadata(self):
+        metadata = self.tool._get_metadata()
+        assert metadata.name == "llm_summary_skill"
+        assert metadata.execution_mode == "python_llm"
+        assert metadata.requires_sandbox is False
+        assert metadata.requires_llm is True
+        assert metadata.risk_level == "medium"
+
+    def test_get_parameters(self):
+        params = self.tool._get_parameters()
+        param_names = [p.name for p in params]
+        assert "text" in param_names
+        assert "max_length" in param_names
+        assert "style" in param_names
+        assert "language" in param_names
+
+    def test_empty_text_rejected(self):
+        result = asyncio.run(self.tool.execute(None, None, text=""))
+        assert result.success is False
+        assert "empty" in result.error.lower()
+
+    def test_invalid_style(self):
+        with pytest.raises(ValueError):
+            asyncio.run(self.tool.execute(None, None, text="Hello world", style="invalid_style"))
+
+    def test_text_too_large(self):
+        large_text = "x" * 100000
+        result = asyncio.run(self.tool.execute(None, None, text=large_text))
+        assert result.success is False
+        assert "large" in result.error.lower()
+
+    def test_execution_time_set(self):
+        result = asyncio.run(self.tool.execute(None, None, text="test"))
+        assert result.execution_time_ms is not None
