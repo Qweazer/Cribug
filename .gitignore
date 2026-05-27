@@ -37,3 +37,5 @@ Thumbs.db
 # Local Go workspace (do not track)
 go/
 scripts/
+sandbox/runner/target/
+sandbox/runner/Cargo.lock
