@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -121,6 +122,13 @@ func truncateForMock(s string, maxLen int) string {
 	return s
 }
 
+func truncateStr(s string, maxLen int) string {
+	if len(s) > maxLen {
+		return s[:maxLen]
+	}
+	return s
+}
+
 // ── Real Sandbox Runner (calls Rust sandbox binary) ─────────────
 
 type RealSandboxRunner struct {
@@ -138,6 +146,18 @@ func NewRealSandboxRunner() *RealSandboxRunner {
 func (r *RealSandboxRunner) Execute(ctx context.Context, input SandboxRunInput) (*SandboxRunOutput, error) {
 	start := time.Now()
 
+	// RealSandboxRunner only supports WASI wasm. Other languages must be rejected.
+	lang := strings.ToLower(strings.TrimSpace(input.Language))
+	if lang != "wasi" && lang != "wasm" {
+		return &SandboxRunOutput{
+			Stdout: "",
+			Stderr: fmt.Sprintf("unsupported language '%s': RealSandboxRunner only supports 'wasi'/'wasm'. Use MockSandboxRunner for testing other languages.", input.Language),
+			ExitCode:        -1,
+			DurationMs:      time.Since(start).Milliseconds(),
+			NetworkBlocked:  true,
+		}, nil
+	}
+
 	timeout := types.DefaultSandboxWallTimeoutSec
 	memoryMB := types.DefaultSandboxMemoryMB
 	if input.Policy != nil {
@@ -148,38 +168,81 @@ func (r *RealSandboxRunner) Execute(ctx context.Context, input SandboxRunInput) 
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
+	wasmBytes := []byte(input.Code)
+	if strings.HasSuffix(strings.TrimSpace(input.Code), ".wasm") {
+		var readErr error
+		wasmBytes, readErr = os.ReadFile(strings.TrimSpace(input.Code))
+		if readErr != nil {
+			return nil, fmt.Errorf("read wasm fixture: %w", readErr)
+		}
+	}
+
 	cmd := exec.CommandContext(ctx, r.RunnerPath,
-		"--language", input.Language,
 		"--memory-mb", fmt.Sprintf("%d", memoryMB),
+		"--timeout-sec", fmt.Sprintf("%d", timeout),
 	)
-	cmd.Stdin = strings.NewReader(input.Code)
+	cmd.Stdin = strings.NewReader(string(wasmBytes))
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	cmdRunErr := cmd.Run()
 	duration := time.Since(start).Milliseconds()
 
-	exitCode := 0
-	if err != nil {
+	// Parse JSON output from Rust sandbox runner
+	type runnerOutput struct {
+		Success        bool   `json:"success"`
+		ExitCode       int    `json:"exit_code"`
+		Stdout         string `json:"stdout"`
+		Stderr         string `json:"stderr"`
+		DurationMs     int64  `json:"duration_ms"`
+		Error          string `json:"error"`
+		ErrorType      string `json:"error_type"`
+		StdoutTrunc    bool   `json:"stdout_truncated"`
+		StderrTrunc    bool   `json:"stderr_truncated"`
+	}
+
+	var runnerOut runnerOutput
+	if err := json.Unmarshal(stdout.Bytes(), &runnerOut); err != nil {
+		// Couldn't parse JSON — use raw output as stderr
+		return &SandboxRunOutput{
+			ExitCode:   -1,
+			DurationMs: duration,
+			Stderr:     fmt.Sprintf("failed to parse runner output: %v; raw: %s", err, truncateStr(stdout.String(), 500)),
+			NetworkBlocked: true,
+		}, nil
+	}
+
+	// Check for sandbox timeout or execution error
+	if cmdRunErr != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return &SandboxRunOutput{
 				ExitCode:   -1,
 				DurationMs: duration,
 				Stderr:     "sandbox timeout",
+				NetworkBlocked: true,
 			}, nil
 		}
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			exitCode = -1
-		}
+		// Runner exited non-zero or was killed
 	}
 
-	// Apply limits
-	stdoutStr := stdout.String()
-	stderrStr := stderr.String()
+	// If the Rust runner reported an error
+	if !runnerOut.Success && runnerOut.ExitCode != 0 {
+		return &SandboxRunOutput{
+			Stdout:          runnerOut.Stdout,
+			Stderr:          runnerOut.Stderr,
+			ExitCode:        runnerOut.ExitCode,
+			DurationMs:      duration,
+			NetworkBlocked:  true,
+			StdoutTruncated: runnerOut.StdoutTrunc,
+			StderrTruncated: runnerOut.StderrTrunc,
+		}, nil
+	}
+
+	// Apply Go-level limits
+	stdoutStr := runnerOut.Stdout
+	stderrStr := runnerOut.Stderr
 	maxStdout := types.DefaultSandboxStdoutMaxBytes
 	maxStderr := types.DefaultSandboxStderrMaxBytes
 	if input.Policy != nil {
@@ -187,8 +250,8 @@ func (r *RealSandboxRunner) Execute(ctx context.Context, input SandboxRunInput) 
 		maxStderr = input.Policy.EffectiveMaxStderr()
 	}
 
-	stdoutTrunc := false
-	stderrTrunc := false
+	stdoutTrunc := runnerOut.StdoutTrunc
+	stderrTrunc := runnerOut.StderrTrunc
 	if len(stdoutStr) > maxStdout {
 		stdoutStr = stdoutStr[:maxStdout]
 		stdoutTrunc = true
@@ -201,7 +264,7 @@ func (r *RealSandboxRunner) Execute(ctx context.Context, input SandboxRunInput) 
 	return &SandboxRunOutput{
 		Stdout:          stdoutStr,
 		Stderr:          stderrStr,
-		ExitCode:        exitCode,
+		ExitCode:        0,
 		DurationMs:      duration,
 		NetworkBlocked:  true,
 		StdoutTruncated: stdoutTrunc,
