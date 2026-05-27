@@ -72,26 +72,63 @@ class LLMSummaryTool(Tool):
         ]
 
     def _get_llm_config(self) -> Dict[str, str]:
-        """Read LLM configuration from environment variables"""
+        """Read LLM configuration from environment variables.
+
+        Priority:
+        1. MINIMAX_API_KEY -> provider=minimax, model from LLM_MODEL or MiniMax-M2.7
+        2. LLM_API_KEY + LLM_PROVIDER=minimax -> provider=minimax
+        3. LLM_API_KEY + LLM_PROVIDER -> generic openai_compatible
+        4. OPENAI_API_KEY -> provider=openai
+        5. ANTHROPIC_API_KEY -> provider=anthropic
+        6. GOOGLE_API_KEY -> provider=google
+        """
         config = {}
 
+        # MiniMax (dedicated)
+        if os.getenv("MINIMAX_API_KEY"):
+            config["provider"] = "minimax"
+            config["api_key"] = os.getenv("MINIMAX_API_KEY")
+            config["model"] = os.getenv("LLM_MODEL") or os.getenv("MINIMAX_MODEL") or "MiniMax-M2.7"
+            config["base_url"] = os.getenv("MINIMAX_BASE_URL") or "https://api.minimaxi.com/v1"
+            return config
+
+        # Generic LLM_API_KEY with LLM_PROVIDER (supports minimax, openai_compatible)
+        llm_api_key = os.getenv("LLM_API_KEY")
+        llm_provider = os.getenv("LLM_PROVIDER", "").lower()
+        if llm_api_key:
+            config["api_key"] = llm_api_key
+            config["model"] = os.getenv("LLM_MODEL") or "MiniMax-M2.7"
+            if llm_provider == "minimax":
+                config["provider"] = "minimax"
+                config["base_url"] = os.getenv("LLM_BASE_URL") or os.getenv("MINIMAX_BASE_URL") or "https://api.minimaxi.com/v1"
+            else:
+                config["provider"] = llm_provider or "openai_compatible"
+                config["base_url"] = os.getenv("LLM_BASE_URL") or os.getenv("OPENAI_BASE_URL")
+            return config
+
+        # OpenAI
         if os.getenv("OPENAI_API_KEY"):
             config["provider"] = "openai"
             config["api_key"] = os.getenv("OPENAI_API_KEY")
             config["model"] = os.getenv("OPENAI_MODEL") or os.getenv("LLM_MODEL") or "gpt-4o-mini"
             config["base_url"] = os.getenv("LLM_BASE_URL") or os.getenv("OPENAI_BASE_URL")
-        elif os.getenv("ANTHROPIC_API_KEY"):
+            return config
+
+        # Anthropic
+        if os.getenv("ANTHROPIC_API_KEY"):
             config["provider"] = "anthropic"
             config["api_key"] = os.getenv("ANTHROPIC_API_KEY")
             config["model"] = os.getenv("ANTHROPIC_MODEL") or os.getenv("LLM_MODEL") or "claude-3-haiku-20240307"
-        elif os.getenv("GOOGLE_API_KEY"):
+            return config
+
+        # Google
+        if os.getenv("GOOGLE_API_KEY"):
             config["provider"] = "google"
             config["api_key"] = os.getenv("GOOGLE_API_KEY")
             config["model"] = os.getenv("GOOGLE_MODEL") or os.getenv("LLM_MODEL") or "gemini-pro"
-        else:
-            return {}
+            return config
 
-        return config
+        return {}
 
     def _build_summary_prompt(self, text: str, style: str, language: str, max_length: int) -> str:
         """Build the LLM prompt for summarization"""
