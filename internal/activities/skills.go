@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
+	hookspkg "cribug/internal/hooks"
 	"cribug/internal/db"
 	"cribug/internal/events"
 	redisclient "cribug/internal/redis"
@@ -15,9 +17,15 @@ import (
 
 // SkillActivities handles skill-related Temporal activities
 type SkillActivities struct {
-	client *skillclient.Client
-	db     *db.Postgres
-	redis  *redisclient.Client
+	client      *skillclient.Client
+	db          *db.Postgres
+	redis       *redisclient.Client
+	hookRuntime *hookspkg.HookRuntime
+}
+
+// SetHookRuntime injects the hook runtime for inline hooks.
+func (a *SkillActivities) SetHookRuntime(runtime *hookspkg.HookRuntime) {
+	a.hookRuntime = runtime
 }
 
 func NewSkillActivities(client *skillclient.Client, database *db.Postgres, redisClient *redisclient.Client) *SkillActivities {
@@ -196,6 +204,29 @@ func (a *SkillActivities) WorkspaceAppendSkillResultActivity(ctx context.Context
 
 	if a.redis != nil {
 		a.redis.AppendTaskEvent(ctx, input.TaskID, evt)
+	}
+
+	// Emit on_workspace_append hook (non-blocking, fire-and-forget)
+	if a.hookRuntime != nil {
+		event := hookspkg.HookEvent{
+			EventID:         uuid.New().String(),
+			HookPoint:       hookspkg.HookPointOnWorkspaceAppend,
+			AgentID:         input.AgentID,
+			WorkflowID:      input.WorkflowID,
+			TenantID:        "00000000-0000-0000-0000-000000000000",
+			Timestamp:       time.Now().UTC(),
+			SourceComponent: "workspace",
+			HookOrigin:      false,
+			RecursionDepth:  0,
+			Payload: map[string]interface{}{
+				"agent_id":       input.AgentID,
+				"task_id":        input.TaskID,
+				"item_type":      "skill_result",
+				"content_length": len(content),
+			},
+		}
+		a.hookRuntime.EmitAndExecute(ctx, event)
+		// on_workspace_append is always non-blocking; ignore decision
 	}
 
 	return WorkspaceAppendOutput{ItemID: itemID}, nil

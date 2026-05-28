@@ -116,6 +116,7 @@ func main() {
 
 	// Phase 6C: Skills System Activities & Workflow
 	skillActivities := activities.NewSkillActivities(nil, dbClient, redisClient)
+	skillActivities.SetHookRuntime(hookRuntime)
 	w.RegisterActivityWithOptions(skillActivities.ListSkillsActivity, activity.RegisterOptions{Name: "ListSkillsActivity"})
 	w.RegisterActivityWithOptions(skillActivities.GetSkillActivity, activity.RegisterOptions{Name: "GetSkillActivity"})
 	w.RegisterActivityWithOptions(skillActivities.ExecuteSkillActivity, activity.RegisterOptions{Name: "ExecuteSkillActivity"})
