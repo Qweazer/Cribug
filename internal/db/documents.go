@@ -108,6 +108,31 @@ func (r *DocumentRepository) GetDocument(ctx context.Context, id string) (*Docum
 	return &doc, nil
 }
 
+// GetChunkByID retrieves a single chunk by its ID. Returns nil if not found.
+func (r *DocumentRepository) GetChunkByID(ctx context.Context, id string) (*DocumentChunk, error) {
+	if r.db == nil {
+		return nil, fmt.Errorf("document repository: db not initialized")
+	}
+	query := `SELECT id, document_id, tenant_id, chunk_index, content, content_hash,
+		token_count, embedding_model, embedding_dimension,
+		qdrant_collection, qdrant_point_id, status, error, created_at, updated_at
+		FROM document_chunks WHERE id = $1`
+	var c DocumentChunk
+	err := r.db.QueryRowContext(ctx, query, id).Scan(
+		&c.ID, &c.DocumentID, &c.TenantID, &c.ChunkIndex,
+		&c.Content, &c.ContentHash, &c.TokenCount,
+		&c.EmbeddingModel, &c.EmbeddingDimension,
+		&c.QdrantCollection, &c.QdrantPointID,
+		&c.Status, &c.Error, &c.CreatedAt, &c.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get chunk: %w", err)
+	}
+	return &c, nil
+}
+
 // FindByContentHash looks up a document by tenant_id and content_hash.
 // Returns nil if not found.
 func (r *DocumentRepository) FindByContentHash(ctx context.Context, tenantID, hash string) (*Document, error) {
