@@ -3,16 +3,17 @@ package types
 // ── Swarm Workflow Input / Output ──────────────────────────────
 
 type SwarmWorkflowInput struct {
-	TaskID        string  `json:"task_id"`
-	WorkflowID    string  `json:"workflow_id"`
-	RunID         string  `json:"run_id"`
-	Query         string  `json:"query"`
-	Model         string  `json:"model"`
-	Temperature   float64 `json:"temperature"`
-	MaxTokens     int     `json:"max_tokens"`
-	WorkerCount   int     `json:"worker_count"`
-	WorkerTimeout int     `json:"worker_timeout"`
-	MaxP2PRounds  int     `json:"max_p2p_rounds"` // default 2, prevents infinite loops
+	TaskID         string  `json:"task_id"`
+	WorkflowID     string  `json:"workflow_id"`
+	RunID          string  `json:"run_id"`
+	Query          string  `json:"query"`
+	Model          string  `json:"model"`
+	Temperature    float64 `json:"temperature"`
+	MaxTokens      int     `json:"max_tokens"`
+	WorkerCount    int     `json:"worker_count"`
+	WorkerTimeout  int     `json:"worker_timeout"`
+	MaxP2PRounds   int     `json:"max_p2p_rounds"`   // default 2, prevents infinite loops
+	NeedsRetrieval bool    `json:"needs_retrieval"`   // Phase 6E-4: leader performs RAG before dispatch
 }
 
 type SwarmWorkflowResult struct {
@@ -48,6 +49,8 @@ type WorkerAgentInput struct {
 	Round            int              `json:"round,omitempty"`           // Phase 5B
 	WorkspaceItems   []WorkspaceItem  `json:"workspace_items,omitempty"`   // Phase 5C
 	WorkspaceSummary *WorkspaceSummary `json:"workspace_summary,omitempty"` // Phase 5C
+	RetrievalContextID string `json:"retrieval_context_id,omitempty"`  // Phase 6E-4
+	RetrievalContext   string `json:"retrieval_context,omitempty"`     // Phase 6E-4
 }
 
 type WorkerAgentResult struct {
@@ -249,6 +252,16 @@ const (
 	HandoffFailed    = "failed"
 	HandoffTimedOut  = "timed_out"
 )
+
+// ── RAG Context (Phase 6E-4) ──────────────────────────────────────
+
+// RAGContext holds the shared retrieval context from leader for swarm workers.
+type RAGContext struct {
+	Context       string   `json:"context"`
+	Citations     []string `json:"citations"`
+	TokenEstimate int      `json:"token_estimate"`
+	ChunkCount    int      `json:"chunk_count"`
+}
 
 // ── Status Constants ────────────────────────────────────────────
 

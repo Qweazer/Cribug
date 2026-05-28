@@ -82,6 +82,69 @@ func (sw *SwarmWorkflow) Execute(ctx workflow.Context, req types.SwarmWorkflowIn
 	sigCh := workflow.GetSignalChannel(ctx, "swarm_mailbox")
 	var signalCount int
 
+	// ── Leader Retrieval (Phase 6E-4) ─────────────────────────────
+	var retrievalCtxID string
+	var retrievalCtxPacked string
+
+	if req.NeedsRetrieval {
+		ctxRAG := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+			StartToCloseTimeout: 5 * time.Minute,
+			RetryPolicy: &temporal.RetryPolicy{
+				MaximumAttempts: 2,
+				InitialInterval: 1 * time.Second,
+				BackoffCoefficient: 2.0,
+				MaximumInterval: 5 * time.Second,
+			},
+		})
+
+		var searchOutput RAGSearchOutput
+		err := workflow.ExecuteActivity(ctxRAG, "EmbedAndSearchChunksActivity", RAGSearchInput{
+			QueryText:  req.Query,
+			Collection: "task_embeddings",
+			Model:      req.Model,
+			TopK:       5,
+			Threshold:  0.7,
+		}).Get(ctxRAG, &searchOutput)
+
+		if err != nil {
+			logger.Warn("Leader RAG search failed, workers proceed without context", "error", err)
+		} else if len(searchOutput.Hits) == 0 {
+			logger.Warn("Leader RAG search returned no hits, workers proceed without context")
+		} else {
+			chunkIDs := make([]string, len(searchOutput.Hits))
+			for i, h := range searchOutput.Hits {
+				chunkIDs[i] = h.ChunkID
+			}
+
+			var fetchOutput RAGFetchOutput
+			err = workflow.ExecuteActivity(ctxRAG, "FetchChunkContentActivity", RAGFetchInput{
+				ChunkIDs: chunkIDs,
+			}).Get(ctxRAG, &fetchOutput)
+
+			if err != nil {
+				logger.Warn("Leader RAG fetch failed, workers proceed without context", "error", err)
+			} else {
+				var packOutput RAGPackOutput
+				err = workflow.ExecuteActivity(ctxRAG, "PackContextActivity", RAGPackInput{
+					Query:     req.Query,
+					Chunks:    fetchOutput.Chunks,
+					MaxTokens: 4000,
+				}).Get(ctxRAG, &packOutput)
+
+				if err != nil {
+					logger.Warn("Leader RAG pack failed, workers proceed without context", "error", err)
+				} else {
+					retrievalCtxID = fmt.Sprintf("rag-%s", req.WorkflowID)
+					retrievalCtxPacked = packOutput.Context
+					logger.Info("Leader RAG retrieval complete",
+						"chunks", len(fetchOutput.Chunks),
+						"citations", len(packOutput.Citations),
+						"context_len", len(packOutput.Context))
+				}
+			}
+		}
+	}
+
 	// ── Execute rounds ───────────────────────────────────────────
 	for round := 0; round <= req.MaxP2PRounds; round++ {
 		// Non-blocking signal check at start of each round (Phase 5D)
@@ -179,6 +242,8 @@ func (sw *SwarmWorkflow) Execute(ctx workflow.Context, req types.SwarmWorkflowIn
 				InboxMessages: rt.inbox, Round: round,
 				WorkspaceItems: workspaceItems,
 				WorkspaceSummary: buildWorkspaceSummary(workspaceItems),
+				RetrievalContextID: retrievalCtxID,
+				RetrievalContext:   retrievalCtxPacked,
 			})
 		}
 
@@ -213,72 +278,74 @@ func (sw *SwarmWorkflow) Execute(ctx workflow.Context, req types.SwarmWorkflowIn
 					delete(roundFutures, agentID)
 
 					// Collect workspace appends from this worker
-				for _, w := range wr.WorkspaceAppends {
-					w.Status = types.WSStatusAppended
-					workspaceItems = append(workspaceItems, w)
-					workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
-						TaskID: req.TaskID,
-						Event:  events.NewWorkspaceItemCreatedEvent(req.TaskID, req.WorkflowID, w.ItemID, w.AgentID, w.Role, w.ItemType, round),
-					}).Get(ctx, nil)
-				}
-				for _, readID := range wr.WorkspaceReads {
-					workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
-						TaskID: req.TaskID,
-						Event:  events.NewWorkspaceItemReadEvent(req.TaskID, req.WorkflowID, readID, wr.AgentID, wr.Role, round),
-					}).Get(ctx, nil)
-				}
-
-				// Handle handoff request (Phase 5G)
-				if wr.HandoffRequest != nil {
-					hr := wr.HandoffRequest
-					workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
-						TaskID: req.TaskID,
-						Event: events.NewHandoffRequestedEvent(req.TaskID, req.WorkflowID, hr.SourceAgentID, hr.TargetAgentID, hr.Reason, round),
-					}).Get(ctx, nil)
-
-					// Validate target agent
-					if _, ok := agentIDs[hr.TargetAgentID]; ok {
-						he := types.HandoffEvent{
-							HandoffID: fmt.Sprintf("ho-%s-r%d-%s-%s", req.WorkflowID, round, hr.SourceAgentID, hr.TargetAgentID),
-							Status: types.HandoffAccepted, Request: *hr, Round: round,
-						}
+					for _, w := range wr.WorkspaceAppends {
+						w.Status = types.WSStatusAppended
+						workspaceItems = append(workspaceItems, w)
 						workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
 							TaskID: req.TaskID,
-							Event: events.NewHandoffAcceptedEvent(req.TaskID, req.WorkflowID, hr.SourceAgentID, hr.TargetAgentID, round),
-						}).Get(ctx, nil)
-
-						// Schedule target worker with handoff context
-						targetWf := agentIDs[hr.TargetAgentID]
-						hoTask := fmt.Sprintf("Handoff from %s: %s. Context: %s", hr.SourceAgentID, hr.Reason, hr.ContextSnapshot)
-						hoFuture := workflow.ExecuteActivity(ctx, "WorkerAgentActivity", types.WorkerAgentInput{
-							TaskID: req.TaskID, WorkflowID: req.WorkflowID, RunID: req.RunID,
-							AgentID: hr.TargetAgentID, Role: targetWf.Role, Task: hoTask,
-							Model: req.Model, Temperature: req.Temperature, MaxTokens: req.MaxTokens,
-							Round: round, WorkspaceItems: workspaceItems,
-							WorkspaceSummary: buildWorkspaceSummary(workspaceItems),
-						})
-
-						var hoResult types.WorkerAgentResult
-						if hoErr := hoFuture.Get(ctx, &hoResult); hoErr == nil {
-							succeeded++; totalTokens += hoResult.TotalTokens; totalLatency += hoResult.LatencyMs
-							allResults = append(allResults, hoResult)
-							he.Status = types.HandoffCompleted
-							workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
-								TaskID: req.TaskID,
-								Event: events.NewHandoffCompletedEvent(req.TaskID, req.WorkflowID, he.HandoffID, hr.TargetAgentID, round),
-							}).Get(ctx, nil)
-						} else {
-							he.Status = types.HandoffFailed
-						}
-					} else {
-						workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
-							TaskID: req.TaskID,
-							Event: events.NewHandoffRejectedEvent(req.TaskID, req.WorkflowID, hr.SourceAgentID, hr.TargetAgentID, "invalid target", round),
+							Event:  events.NewWorkspaceItemCreatedEvent(req.TaskID, req.WorkflowID, w.ItemID, w.AgentID, w.Role, w.ItemType, round),
 						}).Get(ctx, nil)
 					}
-				}
+					for _, readID := range wr.WorkspaceReads {
+						workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+							TaskID: req.TaskID,
+							Event:  events.NewWorkspaceItemReadEvent(req.TaskID, req.WorkflowID, readID, wr.AgentID, wr.Role, round),
+						}).Get(ctx, nil)
+					}
 
-				// Route outbound messages
+					// Handle handoff request (Phase 5G)
+					if wr.HandoffRequest != nil {
+						hr := wr.HandoffRequest
+						workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+							TaskID: req.TaskID,
+							Event: events.NewHandoffRequestedEvent(req.TaskID, req.WorkflowID, hr.SourceAgentID, hr.TargetAgentID, hr.Reason, round),
+						}).Get(ctx, nil)
+
+						// Validate target agent
+						if _, ok := agentIDs[hr.TargetAgentID]; ok {
+							he := types.HandoffEvent{
+								HandoffID: fmt.Sprintf("ho-%s-r%d-%s-%s", req.WorkflowID, round, hr.SourceAgentID, hr.TargetAgentID),
+								Status: types.HandoffAccepted, Request: *hr, Round: round,
+							}
+							workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+								TaskID: req.TaskID,
+								Event: events.NewHandoffAcceptedEvent(req.TaskID, req.WorkflowID, hr.SourceAgentID, hr.TargetAgentID, round),
+							}).Get(ctx, nil)
+
+							// Schedule target worker with handoff context
+							targetWf := agentIDs[hr.TargetAgentID]
+							hoTask := fmt.Sprintf("Handoff from %s: %s. Context: %s", hr.SourceAgentID, hr.Reason, hr.ContextSnapshot)
+							hoFuture := workflow.ExecuteActivity(ctx, "WorkerAgentActivity", types.WorkerAgentInput{
+								TaskID: req.TaskID, WorkflowID: req.WorkflowID, RunID: req.RunID,
+								AgentID: hr.TargetAgentID, Role: targetWf.Role, Task: hoTask,
+								Model: req.Model, Temperature: req.Temperature, MaxTokens: req.MaxTokens,
+								Round: round, WorkspaceItems: workspaceItems,
+								WorkspaceSummary: buildWorkspaceSummary(workspaceItems),
+								RetrievalContextID: retrievalCtxID,
+								RetrievalContext:   retrievalCtxPacked,
+							})
+
+							var hoResult types.WorkerAgentResult
+							if hoErr := hoFuture.Get(ctx, &hoResult); hoErr == nil {
+								succeeded++; totalTokens += hoResult.TotalTokens; totalLatency += hoResult.LatencyMs
+								allResults = append(allResults, hoResult)
+								he.Status = types.HandoffCompleted
+								workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+									TaskID: req.TaskID,
+									Event: events.NewHandoffCompletedEvent(req.TaskID, req.WorkflowID, he.HandoffID, hr.TargetAgentID, round),
+								}).Get(ctx, nil)
+							} else {
+								he.Status = types.HandoffFailed
+							}
+						} else {
+							workflow.ExecuteActivity(ctx, "EmitEventActivity", activities.EmitEventInput{
+								TaskID: req.TaskID,
+								Event: events.NewHandoffRejectedEvent(req.TaskID, req.WorkflowID, hr.SourceAgentID, hr.TargetAgentID, "invalid target", round),
+							}).Get(ctx, nil)
+						}
+					}
+
+					// Route outbound messages
 					for _, msg := range wr.OutboundMessages {
 						msg.Status = types.MsgStatusCreated
 						msg.Round = round

@@ -35,6 +35,12 @@ func (a *SwarmActivities) WorkerAgent(ctx context.Context, input types.WorkerAge
 		"agent_id", input.AgentID, "role", input.Role,
 		"round", input.Round, "inbox", len(input.InboxMessages))
 
+	// Build system message with role context
+	systemContent := fmt.Sprintf("You are a %s agent.", input.Role)
+	if input.RetrievalContext != "" {
+		systemContent += fmt.Sprintf("\n\nUse the following retrieved context to inform your analysis:\n%s", input.RetrievalContext)
+	}
+
 	// Build prompt with inbox context
 	prompt := input.Task
 	if len(input.InboxMessages) > 0 {
@@ -45,7 +51,7 @@ func (a *SwarmActivities) WorkerAgent(ctx context.Context, input types.WorkerAge
 	}
 
 	messages := []types.LLMMessage{
-		{Role: "system", Content: fmt.Sprintf("You are a %s agent.", input.Role)},
+		{Role: "system", Content: systemContent},
 		{Role: "user", Content: prompt},
 	}
 
