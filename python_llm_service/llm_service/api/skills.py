@@ -104,13 +104,7 @@ async def execute_skill(skill_name: str, request_data: ExecuteRequest) -> Execut
     tool = registry.get_tool(skill_name)
 
     if not tool:
-        return ExecuteResponse(
-            tool_name=skill_name,
-            request_id=request_data.request_id,
-            success=False,
-            error=f"Skill '{skill_name}' not found",
-            error_type="tool_not_found",
-        )
+        raise HTTPException(status_code=404, detail=f"Skill '{skill_name}' not found")
 
     try:
         session_ctx = request_data.session_context
