@@ -9,6 +9,9 @@ import (
 	"time"
 )
 
+// ClientOption configures the skill client.
+type ClientOption func(*Client)
+
 // Client calls Cribug Python Skills API
 type Client struct {
 	baseURL    string
@@ -16,15 +19,22 @@ type Client struct {
 	timeout    time.Duration
 }
 
-func NewClient(baseURL string) *Client {
-	return &Client{
+// NewClient creates a new skill API client with optional configuration.
+func NewClient(baseURL string, opts ...ClientOption) *Client {
+	c := &Client{
 		baseURL:    baseURL,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: &http.Client{},
 		timeout:    30 * time.Second,
 	}
+	c.httpClient.Timeout = c.timeout
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
 }
 
-func WithTimeout(timeout time.Duration) func(*Client) {
+// WithTimeout sets the HTTP client timeout.
+func WithTimeout(timeout time.Duration) ClientOption {
 	return func(c *Client) {
 		c.timeout = timeout
 		c.httpClient.Timeout = timeout
@@ -138,22 +148,24 @@ func (c *Client) ExecuteSkill(ctx context.Context, skillName string, parameters 
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound {
+		return &ExecuteResponse{
+			Success:   false,
+			Error:     "skill not found",
+			ErrorType: "tool_not_found",
+		}, nil
+	}
+	if resp.StatusCode >= 400 {
+		return &ExecuteResponse{
+			Success:   false,
+			Error:     fmt.Sprintf("HTTP error: %d", resp.StatusCode),
+			ErrorType: "http_error",
+		}, nil
+	}
+
 	var result ExecuteResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
-	}
-
-	if resp.StatusCode == http.StatusNotFound {
-		result.Success = false
-		result.Error = "skill not found"
-		result.ErrorType = "tool_not_found"
-		return &result, nil
-	}
-	if resp.StatusCode >= 400 {
-		result.Success = false
-		result.Error = fmt.Sprintf("HTTP error: %d", resp.StatusCode)
-		result.ErrorType = "http_error"
-		return &result, nil
 	}
 
 	return &result, nil
