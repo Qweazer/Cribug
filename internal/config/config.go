@@ -49,6 +49,17 @@ type Config struct {
 	HookHandlerMaxResultBytes    int      // HOOK_HANDLER_MAX_RESULT_BYTES
 	HookAllowedInternalHandlers  []string // HOOK_ALLOWED_INTERNAL_HANDLERS
 	HookAllowedHTTPHosts         []string // HOOK_ALLOWED_HTTP_HOSTS
+
+	// Embeddings + Qdrant (Phase 6E-1)
+	EmbeddingModel        string // EMBEDDING_MODEL
+	EmbeddingDim          int    // EMBEDDING_DIM
+	EmbeddingTimeoutSec   int    // EMBEDDING_TIMEOUT_SECONDS
+	EmbeddingCacheEnabled bool   // EMBEDDING_CACHE_ENABLED
+	EmbeddingCacheMaxSize int    // EMBEDDING_CACHE_MAX_SIZE
+	QdrantHost            string // QDRANT_HOST
+	QdrantPort            int    // QDRANT_PORT
+	QdrantScheme          string // QDRANT_SCHEME
+	QdrantTimeoutSec      int    // QDRANT_TIMEOUT_SECONDS
 }
 
 func Load() *Config {
@@ -94,6 +105,17 @@ func Load() *Config {
 		HookHandlerMaxResultBytes:    getEnvAsInt("HOOK_HANDLER_MAX_RESULT_BYTES", 65536),
 		HookAllowedInternalHandlers:  splitEnv("HOOK_ALLOWED_INTERNAL_HANDLERS", "audit_logger,log_only,permission_check"),
 		HookAllowedHTTPHosts:         splitEnv("HOOK_ALLOWED_HTTP_HOSTS", "localhost,127.0.0.1"),
+
+			// Embeddings + Qdrant (Phase 6E-1)
+			EmbeddingModel:        getEnv("EMBEDDING_MODEL", "text-embedding-3-small"),
+			EmbeddingDim:          getEnvAsInt("EMBEDDING_DIM", 1536),
+			EmbeddingTimeoutSec:   getEnvAsInt("EMBEDDING_TIMEOUT_SECONDS", 30),
+			EmbeddingCacheEnabled: getEnvAsBool("EMBEDDING_CACHE_ENABLED", false),
+			EmbeddingCacheMaxSize: getEnvAsInt("EMBEDDING_CACHE_MAX_SIZE", 1000),
+			QdrantHost:            getEnv("QDRANT_HOST", "localhost"),
+			QdrantPort:            getEnvAsInt("QDRANT_PORT", 6333),
+			QdrantScheme:          getEnv("QDRANT_SCHEME", "http"),
+			QdrantTimeoutSec:      getEnvAsInt("QDRANT_TIMEOUT_SECONDS", 10),
 	}
 
 	if urlStr := os.Getenv("REDIS_URL"); urlStr != "" {
