@@ -1,5 +1,13 @@
 package types
 
+// RetrievalContext holds metadata about RAG retrieval performed during a ReAct step.
+type RetrievalContext struct {
+	HitCount    int      `json:"hit_count,omitempty"`
+	ContextSize int      `json:"context_size,omitempty"`
+	Collection  string   `json:"collection,omitempty"`
+	Citations   []string `json:"citations,omitempty"`
+}
+
 // ReactConfig controls the Workflow-level Reason-Act-Observe loop behavior
 type ReactConfig struct {
 	MaxIterations     int `json:"max_iterations"`
@@ -24,12 +32,13 @@ func DefaultReactConfig() ReactConfig {
 
 // ReactLoopResult contains the results of a Workflow-level ReAct execution
 type ReactLoopResult struct {
-	Thoughts     []string `json:"thoughts"`
-	Actions      []string `json:"actions"`
-	Observations []string `json:"observations"`
-	FinalResult  string   `json:"final_result"`
-	TotalTokens  int      `json:"total_tokens"`
-	Iterations   int      `json:"iterations"`
+	Thoughts     []string          `json:"thoughts"`
+	Actions      []string          `json:"actions"`
+	Observations []string          `json:"observations"`
+	FinalResult  string            `json:"final_result"`
+	TotalTokens  int               `json:"total_tokens"`
+	Iterations   int               `json:"iterations"`
+	Steps        []ReactStep       `json:"steps,omitempty"`
 }
 
 // SaveReActStepInput is the input for SaveReActStepAudit Activity

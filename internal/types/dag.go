@@ -84,11 +84,12 @@ type ReactLoopConfig struct {
 
 // ReactStep represents a single step in ReAct reasoning
 type ReactStep struct {
-	Iteration   int    `json:"iteration"`
-	Thought     string `json:"thought"`
-	Action      string `json:"action"`
-	Observation string `json:"observation"`
-	Timestamp   string `json:"timestamp"`
+	Iteration        int               `json:"iteration"`
+	Thought          string            `json:"thought"`
+	Action           string            `json:"action"`
+	Observation      string            `json:"observation"`
+	Timestamp        string            `json:"timestamp"`
+	RetrievalContext *RetrievalContext `json:"retrieval_context,omitempty"`
 }
 
 // ReactResult holds the result of a ReAct reasoning loop

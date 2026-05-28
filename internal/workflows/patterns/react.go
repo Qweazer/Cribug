@@ -1,6 +1,7 @@
 package patterns
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"strings"
 	"time"
@@ -82,6 +83,7 @@ func ReactLoop(
 	var thoughts []string
 	var actions []string
 	var observations []string
+	var steps []types.ReactStep
 	totalTokens := 0
 	iteration := 0
 
@@ -199,17 +201,92 @@ func ReactLoop(
 			break
 		}
 
-		// Phase 2: ACT - Execute the planned action
+		// Phase 2: RAG Retrieval — check thought for trigger keywords
+		var retrievalCtx *types.RetrievalContext
+		var retrievalContextStr string
+
+		if hasRetrievalTrigger(thought) {
+			logger.Info("RAG retrieval triggered by thought", "iteration", iterNum)
+
+			searchQuery := thought
+			ragCollection := "task_embeddings"
+
+			var searchOutput activities.EmbedAndSearchChunksOutput
+			sErr := workflow.ExecuteActivity(actCtx, "EmbedAndSearchChunksActivity", activities.EmbedAndSearchChunksInput{
+				QueryText:  searchQuery,
+				Collection: ragCollection,
+			}).Get(actCtx, &searchOutput)
+
+			if sErr != nil {
+				logger.Warn("RAG EmbedAndSearchChunks failed, continuing without context",
+					"iteration", iterNum, "error", sErr)
+			} else if len(searchOutput.Hits) > 0 {
+				// Fetch chunk contents for the matched hits
+				chunkIDs := make([]string, 0, len(searchOutput.Hits))
+				for _, hit := range searchOutput.Hits {
+					if hit.ChunkID != "" {
+						chunkIDs = append(chunkIDs, hit.ChunkID)
+					}
+				}
+
+				var fetchOutput activities.FetchChunkContentOutput
+				fErr := workflow.ExecuteActivity(actCtx, "FetchChunkContentActivity", activities.FetchChunkContentInput{
+					ChunkIDs: chunkIDs,
+				}).Get(actCtx, &fetchOutput)
+
+				if fErr != nil {
+					logger.Warn("RAG FetchChunkContent failed, continuing without context",
+						"iteration", iterNum, "error", fErr)
+				} else if len(fetchOutput.Chunks) > 0 {
+					// Pack context from fetched chunks
+					var packOutput activities.PackContextOutput
+					pErr := workflow.ExecuteActivity(actCtx, "PackContextActivity", activities.PackContextInput{
+						Query:  searchQuery,
+						Chunks: fetchOutput.Chunks,
+					}).Get(actCtx, &packOutput)
+
+					if pErr != nil {
+						logger.Warn("RAG PackContext failed, continuing without context",
+							"iteration", iterNum, "error", pErr)
+					} else if packOutput.Context != "" {
+						retrievalContextStr = packOutput.Context
+						retrievalCtx = &types.RetrievalContext{
+							HitCount:    len(searchOutput.Hits),
+							ContextSize: len(packOutput.Context),
+							Collection:  ragCollection,
+							Citations:   packOutput.Citations,
+						}
+						logger.Info("RAG context injected",
+							"iteration", iterNum,
+							"hit_count", retrievalCtx.HitCount,
+							"context_size", retrievalCtx.ContextSize)
+					} else {
+						logger.Info("RAG PackContext returned empty context", "iteration", iterNum)
+					}
+				} else {
+					logger.Info("RAG FetchChunkContent returned no chunks", "iteration", iterNum)
+				}
+			} else {
+				logger.Info("RAG search returned no hits", "iteration", iterNum)
+			}
+		}
+
+		// Phase 3: ACT - Execute the planned action (with optional RAG context)
 		actionQuery := fmt.Sprintf(
 			"ACT on this plan: %s\nProvide your action result directly.",
 			thought,
 		)
 
-		actionMessages := make([]types.LLMMessage, len(history))
-		copy(actionMessages, history)
-		actionMessages = append(actionMessages, types.LLMMessage{
-			Role: "user", Content: actionQuery,
-		})
+		// Build action session messages — inject RAG context as a system message if available.
+		// AgentActivity appends the query to SessionMessages, so we keep it separate.
+		actionSessionMessages := make([]types.LLMMessage, 0, len(history)+1)
+		actionSessionMessages = append(actionSessionMessages, history...)
+		if retrievalContextStr != "" {
+			actionSessionMessages = append(actionSessionMessages, types.LLMMessage{
+				Role:    "system",
+				Content: "[Retrieved Context]\n" + retrievalContextStr + "\n[/Retrieved Context]",
+			})
+		}
 
 		var actionOutput *activities.AgentActivityOutput
 		err = workflow.ExecuteActivity(actCtx, "AgentActivity", activities.AgentActivityInput{
@@ -221,7 +298,7 @@ func ReactLoop(
 			Model:                 model,
 			Temperature:           temperature,
 			MaxCompletionTokens:   maxCompletionTokens,
-			SessionMessages:       history,
+			SessionMessages:       actionSessionMessages,
 			AllowedCompletionTokens: maxCompletionTokens,
 		}).Get(actCtx, &actionOutput)
 
@@ -238,23 +315,23 @@ func ReactLoop(
 		}
 		totalTokens += actionOutput.Usage.TotalTokens
 
-			// Record usage for this Action LLM call
-			_ = workflow.ExecuteActivity(usageCtx, "RecordUsageActivity", activities.RecordUsageInput{
-				TaskID:                taskID,
-				WorkflowID:            workflowID,
-				RunID:                 runID,
-				Provider:              actionOutput.Provider,
-				Model:                 actionOutput.Model,
-				PromptTokens:          actionOutput.Usage.PromptTokens,
-				CompletionTokens:      actionOutput.Usage.CompletionTokens,
-				TotalTokens:           actionOutput.Usage.TotalTokens,
-				LatencyMS:             actionOutput.LatencyMS,
-				FinishReason:          actionOutput.FinishReason,
-				MaxCompletionTokens:   maxCompletionTokens,
-				AgentRole:             fmt.Sprintf("react-action-%d", iterNum),
-			}).Get(usageCtx, nil)
+		// Record usage for this Action LLM call
+		_ = workflow.ExecuteActivity(usageCtx, "RecordUsageActivity", activities.RecordUsageInput{
+			TaskID:                taskID,
+			WorkflowID:            workflowID,
+			RunID:                 runID,
+			Provider:              actionOutput.Provider,
+			Model:                 actionOutput.Model,
+			PromptTokens:          actionOutput.Usage.PromptTokens,
+			CompletionTokens:      actionOutput.Usage.CompletionTokens,
+			TotalTokens:           actionOutput.Usage.TotalTokens,
+			LatencyMS:             actionOutput.LatencyMS,
+			FinishReason:          actionOutput.FinishReason,
+			MaxCompletionTokens:   maxCompletionTokens,
+			AgentRole:             fmt.Sprintf("react-action-%d", iterNum),
+		}).Get(usageCtx, nil)
 
-			// Phase 3: OBSERVE - Record the result
+		// Phase 4: OBSERVE - Record the result
 		observation := fmt.Sprintf("Action result: %s", action)
 		observations = append(observations, observation)
 		if len(observations) > config.MaxObservations {
@@ -267,7 +344,17 @@ func ReactLoop(
 			types.LLMMessage{Role: "user", Content: "OBSERVATION: " + observation},
 		)
 
-		// Phase 4: AUDIT - Write step to Postgres (fire-and-forget, non-blocking)
+		// Collect step
+		steps = append(steps, types.ReactStep{
+			Iteration:        iterNum,
+			Thought:          thought,
+			Action:           action,
+			Observation:      observation,
+			Timestamp:        workflow.Now(ctx).String(),
+			RetrievalContext: retrievalCtx,
+		})
+
+		// Phase 5: AUDIT - Write step to Postgres (fire-and-forget, non-blocking)
 		createdAt := workflow.Now(ctx).UnixNano()
 		_ = workflow.ExecuteActivity(auditCtx, "SaveReActStepAuditActivity", activities.SaveReActStepAuditInput{
 			WorkflowID:  workflowID,
@@ -281,7 +368,18 @@ func ReactLoop(
 		})
 		// Fire-and-forget: audit failure is logged but does not block the main loop
 
-		// Step 5: Emit on_agent_step hook (non-blocking)
+		// Phase 6: Emit on_agent_step hook (non-blocking)
+		hookPayload := map[string]interface{}{
+			"step":        iterNum,
+			"thought":     thought,
+			"action":      action,
+			"observation": observation,
+		}
+		if retrievalCtx != nil {
+			hookPayload["rag_hit_count"] = retrievalCtx.HitCount
+			hookPayload["rag_context_size"] = retrievalCtx.ContextSize
+			hookPayload["rag_collection"] = retrievalCtx.Collection
+		}
 		var hookResult hookspkg.EmitHookEventActivityResult
 		_ = workflow.ExecuteActivity(hookCtx, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
 			HookPoint:       hookspkg.HookPointOnAgentStep,
@@ -289,12 +387,7 @@ func ReactLoop(
 			WorkflowID:      workflowID,
 			TenantID:        "00000000-0000-0000-0000-000000000000",
 			SourceComponent: "react",
-			Payload: map[string]interface{}{
-				"step":        iterNum,
-				"thought":     thought,
-				"action":      action,
-				"observation": observation,
-			},
+			Payload:         hookPayload,
 		}).Get(ctx, &hookResult)
 		_ = hookResult
 
@@ -372,6 +465,7 @@ func ReactLoop(
 		FinalResult:  finalResult,
 		TotalTokens:  totalTokens,
 		Iterations:   iteration,
+		Steps:        steps,
 	}, nil
 }
 
@@ -387,6 +481,18 @@ func getRecentStrings(items []string, window int) []string {
 		return items
 	}
 	return items[len(items)-window:]
+}
+
+// hasRetrievalTrigger checks if the given text contains RAG retrieval trigger keywords.
+func hasRetrievalTrigger(text string) bool {
+	lower := strings.ToLower(text)
+	triggers := []string{"search:", "retrieve:", "lookup:", "rag:"}
+	for _, trigger := range triggers {
+		if strings.Contains(lower, trigger) {
+			return true
+		}
+	}
+	return false
 }
 
 func isFinalAnswer(text string) bool {
