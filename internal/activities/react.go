@@ -8,9 +8,11 @@ import (
 	"strings"
 	"time"
 
+	hookspkg "cribug/internal/hooks"
 	"cribug/internal/llm"
 	"cribug/internal/types"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"go.temporal.io/sdk/activity"
 )
@@ -18,6 +20,7 @@ import (
 type ReActActivities struct {
 	llmClient   *llm.Client
 	redisClient *redis.Client
+	hookRuntime *hookspkg.HookRuntime
 }
 
 func NewReActActivities(llmServiceURL string, redisAddr, redisPass string, redisDB int) *ReActActivities {
@@ -29,6 +32,11 @@ func NewReActActivities(llmServiceURL string, redisAddr, redisPass string, redis
 			DB:       redisDB,
 		}),
 	}
+}
+
+// SetHookRuntime injects the hook runtime for inline LLM hooks.
+func (a *ReActActivities) SetHookRuntime(runtime *hookspkg.HookRuntime) {
+	a.hookRuntime = runtime
 }
 
 type ExecuteReActNodeInput struct {
@@ -68,6 +76,28 @@ func (a *ReActActivities) executeSimpleNode(ctx context.Context, input ExecuteRe
 		{Role: "user", Content: input.Prompt},
 	}
 
+	// Inline before_llm_call hook
+	if a.hookRuntime != nil {
+		event := hookspkg.HookEvent{
+			EventID:         uuid.New().String(),
+			HookPoint:       hookspkg.HookPointBeforeLLMCall,
+			AgentID:         input.TaskID,
+			WorkflowID:      "",
+			TenantID:        "00000000-0000-0000-0000-000000000000",
+			Timestamp:       time.Now().UTC(),
+			SourceComponent: "llm",
+			Payload: map[string]interface{}{
+				"model":     input.Model,
+				"provider":  "openai_compatible",
+				"msg_count": len(messages),
+			},
+		}
+		decision := a.hookRuntime.EmitAndExecute(ctx, event)
+		if decision.Denied {
+			return nil, fmt.Errorf("%s: %s", decision.RejectCode, decision.RejectReason)
+		}
+	}
+
 	resp, err := a.llmClient.Call(ctx, llm.CallRequest{
 		TaskID:              input.TaskID,
 		Provider:            "openai_compatible",
@@ -79,6 +109,28 @@ func (a *ReActActivities) executeSimpleNode(ctx context.Context, input ExecuteRe
 
 	if err != nil {
 		return nil, fmt.Errorf("llm call failed: %w", err)
+	}
+
+	// Inline after_llm_call hook (non-blocking, fire-and-forget)
+	if a.hookRuntime != nil {
+		event := hookspkg.HookEvent{
+			EventID:         uuid.New().String(),
+			HookPoint:       hookspkg.HookPointAfterLLMCall,
+			AgentID:         input.TaskID,
+			WorkflowID:      "",
+			TenantID:        "00000000-0000-0000-0000-000000000000",
+			Timestamp:       time.Now().UTC(),
+			SourceComponent: "llm",
+			Payload: map[string]interface{}{
+				"model":         resp.Model,
+				"provider":      resp.Provider,
+				"token_count":   resp.Usage.TotalTokens,
+				"latency_ms":    resp.LatencyMS,
+				"finish_reason": resp.FinishReason,
+			},
+		}
+		a.hookRuntime.EmitAndExecute(ctx, event)
+		// after_llm_call is always non-blocking; ignore decision
 	}
 
 	return &ExecuteReActNodeOutput{
@@ -119,6 +171,29 @@ Continue until you have a final answer. Format your final answer as: FINAL: your
 	for i := 0; i < maxIterations; i++ {
 		iteration := i + 1
 		logger.Info("ReAct iteration", "iteration", iteration, "max", maxIterations)
+
+		// Inline before_llm_call hook
+		if a.hookRuntime != nil {
+			event := hookspkg.HookEvent{
+				EventID:         uuid.New().String(),
+				HookPoint:       hookspkg.HookPointBeforeLLMCall,
+				AgentID:         input.TaskID,
+				WorkflowID:      "",
+				TenantID:        "00000000-0000-0000-0000-000000000000",
+				Timestamp:       time.Now().UTC(),
+				SourceComponent: "llm",
+				Payload: map[string]interface{}{
+					"model":     input.Model,
+					"provider":  "openai_compatible",
+					"msg_count": len(messages),
+				},
+			}
+			decision := a.hookRuntime.EmitAndExecute(ctx, event)
+			if decision.Denied {
+				logger.Error("ReAct LLM call denied by hook", "iteration", iteration, "code", decision.RejectCode, "reason", decision.RejectReason)
+				return nil, fmt.Errorf("%s: %s", decision.RejectCode, decision.RejectReason)
+			}
+		}
 
 		// Call LLM
 		resp, err := a.llmClient.Call(ctx, llm.CallRequest{

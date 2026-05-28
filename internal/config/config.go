@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -39,6 +40,15 @@ type Config struct {
 	SandboxRunnerPath      string
 	SandboxDefaultTimeout  int
 	SandboxDefaultMemoryMB int
+
+	// Hooks Event System (Phase 6D Slice 20)
+	EnableHooks                  bool     // ENABLE_HOOKS — master switch
+	HooksBlockingEnabled         bool     // HOOKS_BLOCKING_ENABLED
+	HookBlockingFailClosed       bool     // HOOK_BLOCKING_FAIL_CLOSED
+	HookHandlerTimeoutSec        int      // HOOK_HANDLER_TIMEOUT_SECONDS
+	HookHandlerMaxResultBytes    int      // HOOK_HANDLER_MAX_RESULT_BYTES
+	HookAllowedInternalHandlers  []string // HOOK_ALLOWED_INTERNAL_HANDLERS
+	HookAllowedHTTPHosts         []string // HOOK_ALLOWED_HTTP_HOSTS
 }
 
 func Load() *Config {
@@ -75,6 +85,15 @@ func Load() *Config {
 		SandboxRunnerPath:      getEnv("SANDBOX_RUNNER_PATH", "./sandbox/runner/target/release/sandbox-runner"),
 		SandboxDefaultTimeout:  getEnvAsInt("SANDBOX_DEFAULT_TIMEOUT_SEC", 30),
 		SandboxDefaultMemoryMB: getEnvAsInt("SANDBOX_DEFAULT_MEMORY_MB", 128),
+
+		// Hooks Event System (Phase 6D Slice 20)
+		EnableHooks:                  getEnvAsBool("ENABLE_HOOKS", false) || getEnvAsBool("HOOKS_ENABLED", false),
+		HooksBlockingEnabled:         getEnvAsBool("HOOKS_BLOCKING_ENABLED", false),
+		HookBlockingFailClosed:       getEnvAsBool("HOOK_BLOCKING_FAIL_CLOSED", false),
+		HookHandlerTimeoutSec:        getEnvAsInt("HOOK_HANDLER_TIMEOUT_SECONDS", 5),
+		HookHandlerMaxResultBytes:    getEnvAsInt("HOOK_HANDLER_MAX_RESULT_BYTES", 65536),
+		HookAllowedInternalHandlers:  splitEnv("HOOK_ALLOWED_INTERNAL_HANDLERS", "audit_logger,log_only,permission_check"),
+		HookAllowedHTTPHosts:         splitEnv("HOOK_ALLOWED_HTTP_HOSTS", "localhost,127.0.0.1"),
 	}
 
 	if urlStr := os.Getenv("REDIS_URL"); urlStr != "" {
@@ -110,6 +129,22 @@ func getEnvAsInt(key string, defaultValue int) int {
 		}
 	}
 	return defaultValue
+}
+
+func splitEnv(key, defaultValue string) []string {
+	val := getEnv(key, defaultValue)
+	if val == "" {
+		return nil
+	}
+	parts := strings.Split(val, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }
 
 func getEnvAsBool(key string, defaultValue bool) bool {

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"cribug/internal/activities"
+	hookspkg "cribug/internal/hooks"
 	"cribug/internal/types"
 
 	"go.temporal.io/sdk/temporal"
@@ -57,6 +58,31 @@ func (w *SandboxWorkflow) Execute(ctx workflow.Context, input SandboxWorkflowInp
 		},
 	}
 	ctx = workflow.WithActivityOptions(ctx, defaultOpts)
+
+	// Step 0: Emit before_tool_call hook
+	var beforeHookResult hookspkg.EmitHookEventActivityResult
+	_ = workflow.ExecuteActivity(ctx, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+		HookPoint:       hookspkg.HookPointBeforeToolCall,
+		AgentID:         input.AgentID,
+		WorkflowID:      input.WorkflowID,
+		TenantID:        "00000000-0000-0000-0000-000000000000",
+		SourceComponent: "sandbox",
+		Payload: map[string]interface{}{
+			"tool_type": "sandbox",
+			"tool_name": "sandbox_execute",
+			"language":  input.Language,
+			"code_len":  len(input.Code),
+		},
+	}).Get(ctx, &beforeHookResult)
+	if beforeHookResult.Decision.Denied {
+		logger.Warn("Sandbox execution blocked by before_tool_call hook",
+			"reject_code", beforeHookResult.Decision.RejectCode,
+			"reject_reason", beforeHookResult.Decision.RejectReason)
+		return &SandboxWorkflowResult{
+			Success: false,
+			Error:   fmt.Sprintf("%s: %s", beforeHookResult.Decision.RejectCode, beforeHookResult.Decision.RejectReason),
+		}, nil
+	}
 
 	// Step 1: Execute sandbox code
 	var execResult activities.ExecuteSandboxActivityResult
@@ -122,6 +148,46 @@ func (w *SandboxWorkflow) Execute(ctx workflow.Context, input SandboxWorkflowInp
 		logger.Warn("AuditSandboxActivity failed (non-fatal)", "error", auditErr)
 	} else {
 		auditID = auditResult.AuditID
+	}
+
+	// Step 4: Emit after_tool_call hook (non-blocking)
+	var afterHookResult hookspkg.EmitHookEventActivityResult
+	_ = workflow.ExecuteActivity(ctx, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+		HookPoint:       hookspkg.HookPointAfterToolCall,
+		AgentID:         input.AgentID,
+		WorkflowID:      input.WorkflowID,
+		TenantID:        "00000000-0000-0000-0000-000000000000",
+		SourceComponent: "sandbox",
+		Payload: map[string]interface{}{
+			"tool_type":    "sandbox",
+			"tool_name":    "sandbox_execute",
+			"success":      sandboxResult.Success,
+			"exit_code":    sandboxResult.ExitCode,
+			"duration_ms":  sandboxResult.DurationMs,
+			"stdout_size":  len(sandboxResult.Stdout),
+			"stderr_size":  len(sandboxResult.Stderr),
+			"error":        sandboxResult.Error,
+		},
+	}).Get(ctx, &afterHookResult)
+
+	// Step 5: Emit on_error hook if execution failed
+	if !sandboxResult.Success {
+		var errorHookResult hookspkg.EmitHookEventActivityResult
+		_ = workflow.ExecuteActivity(ctx, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+			HookPoint:       hookspkg.HookPointOnError,
+			AgentID:         input.AgentID,
+			WorkflowID:      input.WorkflowID,
+			TenantID:        "00000000-0000-0000-0000-000000000000",
+			SourceComponent: "sandbox",
+			Payload: map[string]interface{}{
+				"error_type":  sandboxResult.ErrorType,
+				"message":     sandboxResult.Error,
+				"component":   "sandbox",
+				"exit_code":   sandboxResult.ExitCode,
+				"recoverable": false,
+			},
+		}).Get(ctx, &errorHookResult)
+		_ = errorHookResult
 	}
 
 	logger.Info("SandboxWorkflow completed",

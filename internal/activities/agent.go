@@ -9,14 +9,17 @@ import (
 	"net/http"
 	"time"
 
+	hookspkg "cribug/internal/hooks"
 	"cribug/internal/types"
 
+	"github.com/google/uuid"
 	"go.temporal.io/sdk/activity"
 )
 
 type AgentActivities struct {
 	llmServiceURL string
 	httpClient    *http.Client
+	hookRuntime   *hookspkg.HookRuntime
 }
 
 func NewAgentActivities(llmServiceURL string) *AgentActivities {
@@ -26,6 +29,11 @@ func NewAgentActivities(llmServiceURL string) *AgentActivities {
 			Timeout: 60 * time.Second,
 		},
 	}
+}
+
+// SetHookRuntime injects the hook runtime for inline LLM hooks.
+func (a *AgentActivities) SetHookRuntime(runtime *hookspkg.HookRuntime) {
+	a.hookRuntime = runtime
 }
 
 type AgentActivityInput struct {
@@ -54,6 +62,28 @@ func (a *AgentActivities) CallLLM(ctx context.Context, input AgentActivityInput)
 	logger := activity.GetLogger(ctx)
 	logger.Info("AgentActivity started", "task_id", input.TaskID, "model", input.Model,
 		"session_messages", len(input.SessionMessages), "allowed_completion", input.AllowedCompletionTokens)
+
+	// Inline before_llm_call hook
+	if a.hookRuntime != nil {
+		event := hookspkg.HookEvent{
+			EventID:         uuid.New().String(),
+			HookPoint:       hookspkg.HookPointBeforeLLMCall,
+			AgentID:         input.TaskID,
+			WorkflowID:      input.WorkflowID,
+			TenantID:        "00000000-0000-0000-0000-000000000000",
+			Timestamp:       time.Now().UTC(),
+			SourceComponent: "llm",
+			Payload: map[string]interface{}{
+				"model":     input.Model,
+				"provider":  "openai_compatible",
+				"msg_count": len(input.SessionMessages) + 1,
+			},
+		}
+		decision := a.hookRuntime.EmitAndExecute(ctx, event)
+		if decision.Denied {
+			return nil, fmt.Errorf("%s: %s", decision.RejectCode, decision.RejectReason)
+		}
+	}
 
 	// Check budget
 	if input.AllowedCompletionTokens <= 0 {
@@ -113,6 +143,28 @@ func (a *AgentActivities) CallLLM(ctx context.Context, input AgentActivityInput)
 
 	if llmResp.Content == "" {
 		return nil, fmt.Errorf("empty content from llm")
+	}
+
+	// Inline after_llm_call hook
+	if a.hookRuntime != nil {
+		event := hookspkg.HookEvent{
+			EventID:         uuid.New().String(),
+			HookPoint:       hookspkg.HookPointAfterLLMCall,
+			AgentID:         input.TaskID,
+			WorkflowID:      input.WorkflowID,
+			TenantID:        "00000000-0000-0000-0000-000000000000",
+			Timestamp:       time.Now().UTC(),
+			SourceComponent: "llm",
+			Payload: map[string]interface{}{
+				"model":         llmResp.Model,
+				"provider":      llmResp.Provider,
+				"token_count":   llmResp.Usage.TotalTokens,
+				"latency_ms":    llmResp.LatencyMS,
+				"finish_reason": llmResp.FinishReason,
+			},
+		}
+		a.hookRuntime.EmitAndExecute(ctx, event)
+		// after_llm_call is always non-blocking; ignore decision
 	}
 
 	logger.Info("AgentActivity completed", "task_id", input.TaskID, "latency_ms", llmResp.LatencyMS)

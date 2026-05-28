@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"cribug/internal/activities"
+	hookspkg "cribug/internal/hooks"
 	"cribug/internal/types"
 
 	"go.temporal.io/sdk/temporal"
@@ -67,6 +68,15 @@ func ReactLoop(
 		},
 	}
 	auditCtx := workflow.WithActivityOptions(ctx, auditOpts)
+
+	// Hook activity options — non-blocking emission
+	hookOpts := workflow.ActivityOptions{
+		StartToCloseTimeout: 30 * time.Second,
+		RetryPolicy: &temporal.RetryPolicy{
+			MaximumAttempts: 1, // No retry for hooks
+		},
+	}
+	hookCtx := workflow.WithActivityOptions(ctx, hookOpts)
 
 	// Initialize state
 	var thoughts []string
@@ -270,6 +280,23 @@ func ReactLoop(
 			CreatedAtNs: createdAt,
 		})
 		// Fire-and-forget: audit failure is logged but does not block the main loop
+
+		// Step 5: Emit on_agent_step hook (non-blocking)
+		var hookResult hookspkg.EmitHookEventActivityResult
+		_ = workflow.ExecuteActivity(hookCtx, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+			HookPoint:       hookspkg.HookPointOnAgentStep,
+			AgentID:         "",
+			WorkflowID:      workflowID,
+			TenantID:        "00000000-0000-0000-0000-000000000000",
+			SourceComponent: "react",
+			Payload: map[string]interface{}{
+				"step":        iterNum,
+				"thought":     thought,
+				"action":      action,
+				"observation": observation,
+			},
+		}).Get(ctx, &hookResult)
+		_ = hookResult
 
 		iteration++
 

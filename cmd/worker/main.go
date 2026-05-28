@@ -6,6 +6,7 @@ import (
 	"cribug/internal/activities"
 	"cribug/internal/config"
 	"cribug/internal/db"
+	"cribug/internal/hooks"
 	redisclient "cribug/internal/redis"
 	"cribug/internal/workflows"
 
@@ -50,6 +51,22 @@ func main() {
 	multiAgentActivities := activities.NewMultiAgentActivities(cfg.LLMServiceURL)
 	reactActivities := activities.NewReActActivities(cfg.LLMServiceURL, cfg.RedisAddr, cfg.RedisPass, cfg.RedisDB)
 
+	// Phase 6D: Hooks Event System
+	hookRuntimeConfig := hooks.RuntimeConfig{
+		HooksEnabled:          cfg.EnableHooks,
+		BlockingEnabled:       cfg.HooksBlockingEnabled,
+		BlockingFailClosed:    cfg.HookBlockingFailClosed,
+		HandlerTimeoutSec:     cfg.HookHandlerTimeoutSec,
+		HandlerMaxResultBytes: cfg.HookHandlerMaxResultBytes,
+		AllowedInternalHn:     cfg.HookAllowedInternalHandlers,
+		AllowedHTTPHosts:      cfg.HookAllowedHTTPHosts,
+	}
+	hookRuntime := hooks.NewHookRuntime(dbClient, hookRuntimeConfig)
+	hookActivities := hooks.NewHookActivities(hookRuntime)
+
+	// Inject hook runtime into LLM-calling activities for inline hooks
+	agentActivities.SetHookRuntime(hookRuntime)
+
 	w := worker.New(temporalClient, cfg.TemporalTaskQueue, worker.Options{})
 
 	sw := workflows.NewSimpleWorkflow()
@@ -93,6 +110,18 @@ func main() {
 	// Phase 4B: ReAct Audit Activity (Workflow-level ReAct step audit to Postgres)
 	reactAuditActivities := activities.NewReActAuditActivities(dbClient.Stdlib())
 	w.RegisterActivityWithOptions(reactAuditActivities.SaveReActStepAudit, activity.RegisterOptions{Name: "SaveReActStepAuditActivity"})
+
+	// Phase 6D: Hooks Event System Activity
+	w.RegisterActivityWithOptions(hookActivities.EmitHookEvent, activity.RegisterOptions{Name: "EmitHookEventActivity"})
+
+	// Phase 6C: Skills System Activities & Workflow
+	skillActivities := activities.NewSkillActivities(nil, dbClient, redisClient)
+	w.RegisterActivityWithOptions(skillActivities.ListSkillsActivity, activity.RegisterOptions{Name: "ListSkillsActivity"})
+	w.RegisterActivityWithOptions(skillActivities.GetSkillActivity, activity.RegisterOptions{Name: "GetSkillActivity"})
+	w.RegisterActivityWithOptions(skillActivities.ExecuteSkillActivity, activity.RegisterOptions{Name: "ExecuteSkillActivity"})
+	w.RegisterActivityWithOptions(skillActivities.AuditSkillExecutionActivity, activity.RegisterOptions{Name: "AuditSkillExecutionActivity"})
+	w.RegisterActivityWithOptions(skillActivities.WorkspaceAppendSkillResultActivity, activity.RegisterOptions{Name: "WorkspaceAppendSkillResultActivity"})
+	w.RegisterWorkflowWithOptions(workflows.SkillExecutionWorkflow, workflow.RegisterOptions{Name: "SkillExecutionWorkflow"})
 
 	// Ensure react_steps table exists
 	if err := activities.EnsureReActStepTable(dbClient.Stdlib()); err != nil {

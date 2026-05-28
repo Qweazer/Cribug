@@ -46,6 +46,16 @@ func NewRouter(h *Handler) *chi.Mux {
 		r.Get("/skills/{skill_name}", skillsH.getSkill)
 		r.Post("/skills/{skill_name}/execute", skillsH.executeSkill)
 		r.Get("/skills/audit", skillsH.getAudit)
+
+		// Phase 6D: Hooks Event System
+		hooksH := NewHooksHandler(h.db, h.cfg.HookAllowedInternalHandlers, h.cfg.HookAllowedHTTPHosts)
+		r.Post("/hooks", hooksH.register)
+		r.Get("/hooks", hooksH.list)
+		r.Get("/hooks/{hook_id}", hooksH.get)
+		r.Delete("/hooks/{hook_id}", hooksH.delete)
+		r.Patch("/hooks/{hook_id}/enable", hooksH.enable)
+		r.Patch("/hooks/{hook_id}/disable", hooksH.disable)
+		r.Get("/hooks/audit", hooksH.getAudit)
 	})
 
 	return r

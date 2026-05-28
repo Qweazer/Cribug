@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"cribug/internal/activities"
+	hookspkg "cribug/internal/hooks"
 	"cribug/internal/types"
 
 	"go.temporal.io/sdk/temporal"
@@ -59,6 +60,32 @@ func (w *MCPToolCallWorkflow) Execute(ctx workflow.Context, input MCPToolCallWor
 		},
 	}
 	ctx = workflow.WithActivityOptions(ctx, defaultOpts)
+
+	// Step 0: Emit before_tool_call hook
+	var beforeHookResult hookspkg.EmitHookEventActivityResult
+	_ = workflow.ExecuteActivity(ctx, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+		HookPoint:       hookspkg.HookPointBeforeToolCall,
+		AgentID:         input.AgentID,
+		WorkflowID:      input.WorkflowID,
+		TenantID:        "00000000-0000-0000-0000-000000000000",
+		SourceComponent: "mcp",
+		Payload: map[string]interface{}{
+			"tool_type": "mcp",
+			"tool_name": input.ToolName,
+			"tool_id":   input.ToolID,
+			"server_id": input.ServerID,
+		},
+	}).Get(ctx, &beforeHookResult)
+	// Check if blocked
+	if beforeHookResult.Decision.Denied {
+		logger.Warn("MCP tool call blocked by before_tool_call hook",
+			"reject_code", beforeHookResult.Decision.RejectCode,
+			"reject_reason", beforeHookResult.Decision.RejectReason)
+		return &MCPToolCallWorkflowResult{
+			Success: false,
+			Error:   fmt.Sprintf("%s: %s", beforeHookResult.Decision.RejectCode, beforeHookResult.Decision.RejectReason),
+		}, nil
+	}
 
 	// Step 1: Call MCP tool via Activity (all validation is inside the Activity)
 	var callResult activities.CallMCPToolActivityResult
@@ -133,6 +160,45 @@ func (w *MCPToolCallWorkflow) Execute(ctx workflow.Context, input MCPToolCallWor
 		logger.Warn("AuditMCPToolCallActivity failed (non-fatal)", "error", auditErr)
 	} else {
 		auditID = auditResult.AuditID
+	}
+
+	// Step 4: Emit after_tool_call hook (non-blocking)
+	var afterHookResult hookspkg.EmitHookEventActivityResult
+	_ = workflow.ExecuteActivity(ctx, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+		HookPoint:       hookspkg.HookPointAfterToolCall,
+		AgentID:         input.AgentID,
+		WorkflowID:      input.WorkflowID,
+		TenantID:        "00000000-0000-0000-0000-000000000000",
+		SourceComponent: "mcp",
+		Payload: map[string]interface{}{
+			"tool_type":   "mcp",
+			"tool_name":   input.ToolName,
+			"tool_id":     input.ToolID,
+			"server_id":   input.ServerID,
+			"success":     toolResult.Success,
+			"duration_ms": toolResult.DurationMs,
+			"error":       toolResult.Error,
+		},
+	}).Get(ctx, &afterHookResult)
+
+	// Step 5: Emit on_error hook if tool call failed
+	if !toolResult.Success {
+		var errorHookResult hookspkg.EmitHookEventActivityResult
+		_ = workflow.ExecuteActivity(ctx, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+			HookPoint:       hookspkg.HookPointOnError,
+			AgentID:         input.AgentID,
+			WorkflowID:      input.WorkflowID,
+			TenantID:        "00000000-0000-0000-0000-000000000000",
+			SourceComponent: "mcp",
+			Payload: map[string]interface{}{
+				"error_type": toolResult.ErrorType,
+				"message":    toolResult.Error,
+				"component":  "mcp",
+				"tool_name":  input.ToolName,
+				"recoverable": false,
+			},
+		}).Get(ctx, &errorHookResult)
+		_ = errorHookResult
 	}
 
 	logger.Info("MCPToolCallWorkflow completed",
