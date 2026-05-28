@@ -30,6 +30,10 @@ app = FastAPI()
 from llm_service.api.skills import router as skills_router
 app.include_router(skills_router)
 
+# Phase 6E-1: Embedding endpoint
+from llm_service.api.embed import router as embed_router
+app.include_router(embed_router)
+
 # Build real LLM client from env vars (falls back to mock if no API key)
 _real_client = build_client()
 
