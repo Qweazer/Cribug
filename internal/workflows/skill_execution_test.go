@@ -271,3 +271,136 @@ func TestSkillExecutionWorkflow_AuditFailureDoesNotPanic(t *testing.T) {
 		t.Errorf("expected workspace item to be appended even when audit fails")
 	}
 }
+
+func TestSkillExecutionWorkflow_WithRAGContext(t *testing.T) {
+	env, skill := setupSkillExecutionTest(t)
+	registerSkillActivities(env, skill)
+
+	rag := &activities.RAGRetrievalActivities{}
+	env.RegisterActivityWithOptions(rag.EmbedAndSearchChunksActivity, activity.RegisterOptions{Name: "EmbedAndSearchChunksActivity"})
+	env.RegisterActivityWithOptions(rag.FetchChunkContentActivity, activity.RegisterOptions{Name: "FetchChunkContentActivity"})
+	env.RegisterActivityWithOptions(rag.PackContextActivity, activity.RegisterOptions{Name: "PackContextActivity"})
+
+	env.OnActivity(rag.EmbedAndSearchChunksActivity, mock.Anything, mock.Anything).
+		Return(activities.EmbedAndSearchChunksOutput{
+			Hits: []activities.SearchHit{
+				{ChunkID: "chunk-1", Score: 0.95},
+			},
+		}, nil)
+
+	env.OnActivity(rag.FetchChunkContentActivity, mock.Anything, mock.Anything).
+		Return(activities.FetchChunkContentOutput{
+			Chunks: []activities.ChunkContent{
+				{ChunkID: "chunk-1", DocumentID: "doc-1", Content: "context content", Title: "Doc 1", ChunkIndex: 0},
+			},
+		}, nil)
+
+	env.OnActivity(rag.PackContextActivity, mock.Anything, mock.Anything).
+		Return(activities.PackContextOutput{
+			Context:       "packed context result",
+			Citations:     []string{"[1] Source: Doc 1 (chunk 0)"},
+			TokenEstimate: 10,
+			ChunkCount:    1,
+		}, nil)
+
+	var capturedInput activities.ExecuteSkillInput
+	env.OnActivity(skill.ExecuteSkillActivity, mock.Anything, mock.MatchedBy(func(input activities.ExecuteSkillInput) bool {
+		capturedInput = input
+		return true
+	})).
+		Return(activities.ExecuteSkillOutput{
+			RequestID:       "req-ctx",
+			Success:         true,
+			Output:          map[string]interface{}{"result": "ok"},
+			ExecutionTimeMs: 150,
+		}, nil)
+
+	env.OnActivity(skill.AuditSkillExecutionActivity, mock.Anything, mock.Anything).
+		Return(activities.AuditSkillOutput{AuditID: "audit-ctx"}, nil)
+
+	env.OnActivity(skill.WorkspaceAppendSkillResultActivity, mock.Anything, mock.Anything).
+		Return(activities.WorkspaceAppendOutput{ItemID: "ws-ctx"}, nil)
+
+	env.ExecuteWorkflow(SkillExecutionWorkflowName, SkillExecutionWorkflowInput{
+		SkillName:  "test_skill",
+		Parameters: map[string]interface{}{"retrieve_context": true, "param1": "value1"},
+		TaskID:     "task-1",
+		AgentID:    "agent-1",
+		WorkflowID: "wf-1",
+		RequestID:  "req-ctx",
+	})
+
+	if !env.IsWorkflowCompleted() {
+		t.Fatal("workflow did not complete")
+	}
+
+	var result SkillExecutionWorkflowOutput
+	if err := env.GetWorkflowResult(&result); err != nil {
+		t.Fatalf("workflow result error: %v", err)
+	}
+	if !result.Success {
+		t.Errorf("expected success, got error: %s", result.Error)
+	}
+
+	// Verify context was injected and retrieve_context was removed
+	if ctx, ok := capturedInput.Parameters["context"]; !ok {
+		t.Error("expected context to be injected")
+	} else if ctx != "packed context result" {
+		t.Errorf("expected context 'packed context result', got '%v'", ctx)
+	}
+	if _, ok := capturedInput.Parameters["retrieve_context"]; ok {
+		t.Error("expected retrieve_context to be removed from parameters")
+	}
+	if _, ok := capturedInput.Parameters["param1"]; !ok {
+		t.Error("expected original param1 to be preserved")
+	}
+}
+
+func TestSkillExecutionWorkflow_WithoutRAGContext(t *testing.T) {
+	env, skill := setupSkillExecutionTest(t)
+	registerSkillActivities(env, skill)
+
+	var capturedInput activities.ExecuteSkillInput
+	env.OnActivity(skill.ExecuteSkillActivity, mock.Anything, mock.MatchedBy(func(input activities.ExecuteSkillInput) bool {
+		capturedInput = input
+		return true
+	})).
+		Return(activities.ExecuteSkillOutput{
+			RequestID:       "req-noctx",
+			Success:         true,
+			Output:          map[string]interface{}{"result": "ok"},
+			ExecutionTimeMs: 150,
+		}, nil)
+
+	env.OnActivity(skill.AuditSkillExecutionActivity, mock.Anything, mock.Anything).
+		Return(activities.AuditSkillOutput{AuditID: "audit-noctx"}, nil)
+
+	env.OnActivity(skill.WorkspaceAppendSkillResultActivity, mock.Anything, mock.Anything).
+		Return(activities.WorkspaceAppendOutput{ItemID: "ws-noctx"}, nil)
+
+	env.ExecuteWorkflow(SkillExecutionWorkflowName, SkillExecutionWorkflowInput{
+		SkillName:  "test_skill",
+		Parameters: map[string]interface{}{"param1": "value1"},
+		TaskID:     "task-1",
+		AgentID:    "agent-1",
+		WorkflowID: "wf-1",
+		RequestID:  "req-noctx",
+	})
+
+	if !env.IsWorkflowCompleted() {
+		t.Fatal("workflow did not complete")
+	}
+
+	var result SkillExecutionWorkflowOutput
+	if err := env.GetWorkflowResult(&result); err != nil {
+		t.Fatalf("workflow result error: %v", err)
+	}
+	if !result.Success {
+		t.Errorf("expected success, got error: %s", result.Error)
+	}
+
+	// Verify context was NOT injected
+	if _, ok := capturedInput.Parameters["context"]; ok {
+		t.Error("expected context to NOT be injected when retrieve_context is not set")
+	}
+}

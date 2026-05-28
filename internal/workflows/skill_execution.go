@@ -67,6 +67,48 @@ func SkillExecutionWorkflow(ctx workflow.Context, input SkillExecutionWorkflowIn
 		}, nil
 	}
 
+	// Step 0.5: RAG context retrieval (if enabled via skill params)
+	if retrieveCtx, ok := input.Parameters["retrieve_context"]; ok {
+		if retrieveVal, isBool := retrieveCtx.(bool); isBool && retrieveVal {
+			delete(input.Parameters, "retrieve_context")
+
+			queryText := input.SkillName
+
+			var searchResult activities.EmbedAndSearchChunksOutput
+			err := workflow.ExecuteActivity(ao, "EmbedAndSearchChunksActivity", activities.EmbedAndSearchChunksInput{
+				QueryText: queryText,
+			}).Get(ctx, &searchResult)
+			if err != nil {
+				workflow.GetLogger(ctx).Warn("RAG search failed, skipping context injection", "error", err)
+			} else if len(searchResult.Hits) > 0 {
+				chunkIDs := make([]string, len(searchResult.Hits))
+				for i, hit := range searchResult.Hits {
+					chunkIDs[i] = hit.ChunkID
+				}
+
+				var contentResult activities.FetchChunkContentOutput
+				err = workflow.ExecuteActivity(ao, "FetchChunkContentActivity", activities.FetchChunkContentInput{
+					ChunkIDs: chunkIDs,
+				}).Get(ctx, &contentResult)
+				if err != nil {
+					workflow.GetLogger(ctx).Warn("RAG content fetch failed, skipping context injection", "error", err)
+				} else if len(contentResult.Chunks) > 0 {
+					var packResult activities.PackContextOutput
+					err = workflow.ExecuteActivity(ao, "PackContextActivity", activities.PackContextInput{
+						Query:     queryText,
+						Chunks:    contentResult.Chunks,
+						MaxTokens: 2000,
+					}).Get(ctx, &packResult)
+					if err != nil {
+						workflow.GetLogger(ctx).Warn("RAG context pack failed, skipping context injection", "error", err)
+					} else if packResult.Context != "" {
+						input.Parameters["context"] = packResult.Context
+					}
+				}
+			}
+		}
+	}
+
 	// Step 1: Execute skill
 	var execResult activities.ExecuteSkillOutput
 	err := workflow.ExecuteActivity(ao, "ExecuteSkillActivity", activities.ExecuteSkillInput{

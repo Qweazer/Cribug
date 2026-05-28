@@ -69,6 +69,13 @@ class LLMSummaryTool(Tool):
                 required=False,
                 default="zh",
             ),
+            ToolParameter(
+                name="context",
+                type=ToolParameterType.STRING,
+                description="Optional retrieved context to ground the summary",
+                required=False,
+                default="",
+            ),
         ]
 
     def _get_llm_config(self) -> Dict[str, str]:
@@ -130,7 +137,7 @@ class LLMSummaryTool(Tool):
 
         return {}
 
-    def _build_summary_prompt(self, text: str, style: str, language: str, max_length: int) -> str:
+    def _build_summary_prompt(self, text: str, style: str, language: str, max_length: int, context: str = "") -> str:
         """Build the LLM prompt for summarization"""
         style_instruction = {
             "concise": "Provide a concise summary in the target language.",
@@ -143,16 +150,24 @@ class LLMSummaryTool(Tool):
             "zh": "用目标语言（中文）撰写摘要。",
         }.get(language, f"Write the summary in {language}.")
 
-        return f"""Summarize the following text.
+        base = f"""Summarize the following text.
 Requirements:
 - Summary must be no more than {max_length} characters
 - {style_instruction}
 - {lang_instruction}
 
-Text to summarize:
+"""
+        if context:
+            base += f"""Use the following retrieved context to inform your summary:
+
+{context}
+
+"""
+        base += f"""Text to summarize:
 {text}
 
 Summary:"""
+        return base
 
     async def _execute_impl(
         self,
@@ -164,6 +179,7 @@ Summary:"""
         max_length = kwargs.get("max_length", self.DEFAULT_MAX_LENGTH)
         style = kwargs.get("style", "concise")
         language = kwargs.get("language", "zh")
+        context = kwargs.get("context", "")
 
         if not text:
             return ToolResult(
@@ -199,7 +215,7 @@ Summary:"""
         api_key = config["api_key"]
         base_url = config.get("base_url")
 
-        prompt = self._build_summary_prompt(text, style, language, max_length)
+        prompt = self._build_summary_prompt(text, style, language, max_length, context)
 
         try:
             import httpx

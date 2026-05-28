@@ -112,9 +112,9 @@ func ReactLoop(
 
 	// System prompt for ReAct
 	systemPrompt := `You are a ReAct agent. For each response:
-1. REASON: Think step by step about what to do next
-2. ACT: State your action or provide output
-3. If you have the final answer, start with FINAL:`
+	1. REASON: Think step by step about what to do next
+	2. ACT: State your action or provide output
+	3. If you have the final answer, start with FINAL:`
 
 	// Build initial history - this is passed through Activity parameters each call
 	history := []types.LLMMessage{
@@ -210,64 +210,157 @@ func ReactLoop(
 
 			searchQuery := thought
 			ragCollection := "task_embeddings"
+			ragStartTime := workflow.Now(ctx)
+			ragQueryHash := fmt.Sprintf("%x", sha256.Sum256([]byte(searchQuery)))
 
-			var searchOutput activities.EmbedAndSearchChunksOutput
-			sErr := workflow.ExecuteActivity(actCtx, "EmbedAndSearchChunksActivity", activities.EmbedAndSearchChunksInput{
-				QueryText:  searchQuery,
-				Collection: ragCollection,
-			}).Get(actCtx, &searchOutput)
+			// Phase 6E-4: Before RAG retrieval hook (blocking-capable)
+			var beforeRAGHook hookspkg.EmitHookEventActivityResult
+			_ = workflow.ExecuteActivity(hookCtx, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+				HookPoint:       hookspkg.HookPointBeforeToolCall,
+				AgentID:         "",
+				WorkflowID:      workflowID,
+				TenantID:        "00000000-0000-0000-0000-000000000000",
+				SourceComponent: "react",
+				Payload: map[string]interface{}{
+					"tool_type":       "rag_retrieval",
+					"query_text_hash": ragQueryHash,
+					"collection":      ragCollection,
+					"top_k":           5,
+				},
+			}).Get(ctx, &beforeRAGHook)
+			ragBlocked := beforeRAGHook.Decision.Denied
+			if ragBlocked {
+				logger.Warn("RAG retrieval blocked by before_tool_call hook",
+					"reject_code", beforeRAGHook.Decision.RejectCode,
+					"reject_reason", beforeRAGHook.Decision.RejectReason)
+				_ = workflow.ExecuteActivity(hookCtx, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+					HookPoint:       hookspkg.HookPointOnError,
+					AgentID:         "",
+					WorkflowID:      workflowID,
+					TenantID:        "00000000-0000-0000-0000-000000000000",
+					SourceComponent: "react",
+					Payload: map[string]interface{}{
+						"error_type":      "rag_retrieval",
+						"query_text_hash": ragQueryHash,
+						"error":           beforeRAGHook.Decision.RejectReason,
+					},
+				}).Get(ctx, nil)
+			}
 
-			if sErr != nil {
-				logger.Warn("RAG EmbedAndSearchChunks failed, continuing without context",
-					"iteration", iterNum, "error", sErr)
-			} else if len(searchOutput.Hits) > 0 {
-				// Fetch chunk contents for the matched hits
-				chunkIDs := make([]string, 0, len(searchOutput.Hits))
-				for _, hit := range searchOutput.Hits {
-					if hit.ChunkID != "" {
-						chunkIDs = append(chunkIDs, hit.ChunkID)
-					}
-				}
+			if !ragBlocked {
+				var searchOutput activities.EmbedAndSearchChunksOutput
+				sErr := workflow.ExecuteActivity(actCtx, "EmbedAndSearchChunksActivity", activities.EmbedAndSearchChunksInput{
+					QueryText:  searchQuery,
+					Collection: ragCollection,
+				}).Get(actCtx, &searchOutput)
 
-				var fetchOutput activities.FetchChunkContentOutput
-				fErr := workflow.ExecuteActivity(actCtx, "FetchChunkContentActivity", activities.FetchChunkContentInput{
-					ChunkIDs: chunkIDs,
-				}).Get(actCtx, &fetchOutput)
-
-				if fErr != nil {
-					logger.Warn("RAG FetchChunkContent failed, continuing without context",
-						"iteration", iterNum, "error", fErr)
-				} else if len(fetchOutput.Chunks) > 0 {
-					// Pack context from fetched chunks
-					var packOutput activities.PackContextOutput
-					pErr := workflow.ExecuteActivity(actCtx, "PackContextActivity", activities.PackContextInput{
-						Query:  searchQuery,
-						Chunks: fetchOutput.Chunks,
-					}).Get(actCtx, &packOutput)
-
-					if pErr != nil {
-						logger.Warn("RAG PackContext failed, continuing without context",
-							"iteration", iterNum, "error", pErr)
-					} else if packOutput.Context != "" {
-						retrievalContextStr = packOutput.Context
-						retrievalCtx = &types.RetrievalContext{
-							HitCount:    len(searchOutput.Hits),
-							ContextSize: len(packOutput.Context),
-							Collection:  ragCollection,
-							Citations:   packOutput.Citations,
+				if sErr != nil {
+					logger.Warn("RAG EmbedAndSearchChunks failed, continuing without context",
+						"iteration", iterNum, "error", sErr)
+					// Phase 6E-4: on_error for RAG search failure
+					_ = workflow.ExecuteActivity(hookCtx, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+						HookPoint:       hookspkg.HookPointOnError,
+						AgentID:         "",
+						WorkflowID:      workflowID,
+						TenantID:        "00000000-0000-0000-0000-000000000000",
+						SourceComponent: "react",
+						Payload: map[string]interface{}{
+							"error_type":      "rag_retrieval",
+							"query_text_hash": ragQueryHash,
+							"error":           sErr.Error(),
+						},
+					}).Get(ctx, nil)
+				} else if len(searchOutput.Hits) > 0 {
+					// Fetch chunk contents for the matched hits
+					chunkIDs := make([]string, 0, len(searchOutput.Hits))
+					for _, hit := range searchOutput.Hits {
+						if hit.ChunkID != "" {
+							chunkIDs = append(chunkIDs, hit.ChunkID)
 						}
-						logger.Info("RAG context injected",
-							"iteration", iterNum,
-							"hit_count", retrievalCtx.HitCount,
-							"context_size", retrievalCtx.ContextSize)
+					}
+
+					var fetchOutput activities.FetchChunkContentOutput
+					fErr := workflow.ExecuteActivity(actCtx, "FetchChunkContentActivity", activities.FetchChunkContentInput{
+						ChunkIDs: chunkIDs,
+					}).Get(actCtx, &fetchOutput)
+
+					if fErr != nil {
+						logger.Warn("RAG FetchChunkContent failed, continuing without context",
+							"iteration", iterNum, "error", fErr)
+						// Phase 6E-4: on_error for RAG fetch failure
+						_ = workflow.ExecuteActivity(hookCtx, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+							HookPoint:       hookspkg.HookPointOnError,
+							AgentID:         "",
+							WorkflowID:      workflowID,
+							TenantID:        "00000000-0000-0000-0000-000000000000",
+							SourceComponent: "react",
+							Payload: map[string]interface{}{
+								"error_type":      "rag_retrieval",
+								"query_text_hash": ragQueryHash,
+								"error":           fErr.Error(),
+							},
+						}).Get(ctx, nil)
+					} else if len(fetchOutput.Chunks) > 0 {
+						// Pack context from fetched chunks
+						var packOutput activities.PackContextOutput
+						pErr := workflow.ExecuteActivity(actCtx, "PackContextActivity", activities.PackContextInput{
+							Query:  searchQuery,
+							Chunks: fetchOutput.Chunks,
+						}).Get(actCtx, &packOutput)
+
+						if pErr != nil {
+							logger.Warn("RAG PackContext failed, continuing without context",
+								"iteration", iterNum, "error", pErr)
+							// Phase 6E-4: on_error for RAG pack failure
+							_ = workflow.ExecuteActivity(hookCtx, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+								HookPoint:       hookspkg.HookPointOnError,
+								AgentID:         "",
+								WorkflowID:      workflowID,
+								TenantID:        "00000000-0000-0000-0000-000000000000",
+								SourceComponent: "react",
+								Payload: map[string]interface{}{
+									"error_type":      "rag_retrieval",
+									"query_text_hash": ragQueryHash,
+									"error":           pErr.Error(),
+								},
+							}).Get(ctx, nil)
+						} else if packOutput.Context != "" {
+							retrievalContextStr = packOutput.Context
+							retrievalCtx = &types.RetrievalContext{
+								HitCount:    len(searchOutput.Hits),
+								ContextSize: len(packOutput.Context),
+								Collection:  ragCollection,
+								Citations:   packOutput.Citations,
+							}
+							// Phase 6E-4: After retrieval — emit after_tool_call
+							ragDurationMs := workflow.Now(ctx).Sub(ragStartTime).Milliseconds()
+							_ = workflow.ExecuteActivity(hookCtx, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+								HookPoint:       hookspkg.HookPointAfterToolCall,
+								AgentID:         "",
+								WorkflowID:      workflowID,
+								TenantID:        "00000000-0000-0000-0000-000000000000",
+								SourceComponent: "react",
+								Payload: map[string]interface{}{
+									"tool_type":    "rag_retrieval",
+									"hit_count":    retrievalCtx.HitCount,
+									"context_size": retrievalCtx.ContextSize,
+									"collection":   ragCollection,
+									"duration_ms":  ragDurationMs,
+								},
+							}).Get(ctx, nil)
+							logger.Info("RAG context injected",
+								"iteration", iterNum,
+								"hit_count", retrievalCtx.HitCount,
+								"context_size", retrievalCtx.ContextSize)
+						} else {
+							logger.Info("RAG PackContext returned empty context", "iteration", iterNum)
+						}
 					} else {
-						logger.Info("RAG PackContext returned empty context", "iteration", iterNum)
+						logger.Info("RAG FetchChunkContent returned no chunks", "iteration", iterNum)
 					}
 				} else {
-					logger.Info("RAG FetchChunkContent returned no chunks", "iteration", iterNum)
+					logger.Info("RAG search returned no hits", "iteration", iterNum)
 				}
-			} else {
-				logger.Info("RAG search returned no hits", "iteration", iterNum)
 			}
 		}
 

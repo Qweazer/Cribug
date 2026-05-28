@@ -25,6 +25,7 @@ class TestLLMSummaryTool:
         assert "max_length" in param_names
         assert "style" in param_names
         assert "language" in param_names
+        assert "context" in param_names
 
     def test_empty_text_rejected(self):
         result = asyncio.run(self.tool.execute(None, None, text=""))
@@ -62,3 +63,27 @@ class TestLLMSummaryTool:
     def test_execution_time_set(self):
         result = asyncio.run(self.tool.execute(None, None, text="test"))
         assert result.execution_time_ms is not None
+
+    def test_build_summary_prompt_with_context(self):
+        prompt = self.tool._build_summary_prompt(
+            text="Hello world",
+            style="concise",
+            language="en",
+            max_length=100,
+            context="Some retrieved context",
+        )
+        assert "Some retrieved context" in prompt
+        assert "Use the following retrieved context" in prompt
+        assert "Hello world" in prompt
+        assert "Summary:" in prompt
+
+    def test_build_summary_prompt_without_context(self):
+        prompt = self.tool._build_summary_prompt(
+            text="Hello world",
+            style="concise",
+            language="en",
+            max_length=100,
+        )
+        assert "Hello world" in prompt
+        assert "Use the following retrieved context" not in prompt
+        assert "Summary:" in prompt
