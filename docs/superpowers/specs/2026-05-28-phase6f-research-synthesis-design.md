@@ -9,7 +9,7 @@
 ```
 ResearchSynthesisWorkflow (deterministic)
   ├─ DecomposeQueryActivity          → LLM: break query into subqueries
-  ├─ RetrieveEvidenceActivity ×N    → parallel RAG retrieval per subquery
+  ├─ RetrieveEvidenceActivity ×N    → sequential RAG retrieval per subquery (v1 decision)
   │   (reuses 6E-3 EmbedAndSearchChunks + FetchChunkContent + PackContext)
   ├─ WorkspaceAppend ×N             → write evidence to Workspace
   └─ SynthesizeResultActivity       → LLM: synthesize answer from evidence
@@ -46,7 +46,7 @@ type ResearchSynthesisResult struct {
 
 ResearchSynthesisWorkflow:
 1. Decompose → subqueries
-2. Parallel RetrieveEvidence per subquery (Temporal Futures)
+2. Sequential RetrieveEvidence per subquery (v1 decision, simpler)
 3. Collect results, write to Workspace
 4. Synthesize via LLM
 5. Return answer + evidence metadata
