@@ -1,11 +1,13 @@
 package workflows
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"time"
 
 	"cribug/internal/activities"
 	"cribug/internal/events"
+	hookspkg "cribug/internal/hooks"
 	"cribug/internal/types"
 
 	"go.temporal.io/sdk/temporal"
@@ -87,59 +89,167 @@ func (sw *SwarmWorkflow) Execute(ctx workflow.Context, req types.SwarmWorkflowIn
 	var retrievalCtxPacked string
 
 	if req.NeedsRetrieval {
-		ctxRAG := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-			StartToCloseTimeout: 5 * time.Minute,
-			RetryPolicy: &temporal.RetryPolicy{
-				MaximumAttempts: 2,
-				InitialInterval: 1 * time.Second,
-				BackoffCoefficient: 2.0,
-				MaximumInterval: 5 * time.Second,
-			},
+		ragStartTime := workflow.Now(ctx)
+		ragQueryHash := fmt.Sprintf("%x", sha256.Sum256([]byte(req.Query)))
+
+		// Before RAG tool call hook (blocking-capable)
+		hookCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+			StartToCloseTimeout: 10 * time.Second,
+			RetryPolicy:        &temporal.RetryPolicy{MaximumAttempts: 1},
 		})
+		var beforeHook hookspkg.EmitHookEventActivityResult
+		_ = workflow.ExecuteActivity(hookCtx, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+			HookPoint:       hookspkg.HookPointBeforeToolCall,
+			AgentID:         "",
+			WorkflowID:      req.WorkflowID,
+			TenantID:        "00000000-0000-0000-0000-000000000000",
+			SourceComponent: "swarm",
+			Payload: map[string]interface{}{
+				"tool_type":       "rag_retrieval",
+				"query_text_hash": ragQueryHash,
+				"collection":      "task_embeddings",
+				"top_k":           5,
+			},
+		}).Get(ctx, &beforeHook)
 
-		var searchOutput RAGSearchOutput
-		err := workflow.ExecuteActivity(ctxRAG, "EmbedAndSearchChunksActivity", RAGSearchInput{
-			QueryText:  req.Query,
-			Collection: "task_embeddings",
-			Model:      req.Model,
-			TopK:       5,
-			Threshold:  0.7,
-		}).Get(ctxRAG, &searchOutput)
-
-		if err != nil {
-			logger.Warn("Leader RAG search failed, workers proceed without context", "error", err)
-		} else if len(searchOutput.Hits) == 0 {
-			logger.Warn("Leader RAG search returned no hits, workers proceed without context")
+		if beforeHook.Decision.Denied {
+			// Emit on_error for blocked RAG
+			_ = workflow.ExecuteActivity(hookCtx, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+				HookPoint:       hookspkg.HookPointOnError,
+				AgentID:         "",
+				WorkflowID:      req.WorkflowID,
+				TenantID:        "00000000-0000-0000-0000-000000000000",
+				SourceComponent: "swarm",
+				Payload: map[string]interface{}{
+					"error_type":      "rag_retrieval",
+					"query_text_hash": ragQueryHash,
+					"error":           fmt.Sprintf("blocked: %s: %s", beforeHook.Decision.RejectCode, beforeHook.Decision.RejectReason),
+				},
+			}).Get(ctx, nil)
+			logger.Warn("Leader RAG retrieval blocked by before_tool_call hook",
+				"reject_code", beforeHook.Decision.RejectCode,
+				"reject_reason", beforeHook.Decision.RejectReason)
 		} else {
-			chunkIDs := make([]string, len(searchOutput.Hits))
-			for i, h := range searchOutput.Hits {
-				chunkIDs[i] = h.ChunkID
-			}
+			ctxRAG := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+				StartToCloseTimeout: 5 * time.Minute,
+				RetryPolicy: &temporal.RetryPolicy{
+					MaximumAttempts:    2,
+					InitialInterval:    1 * time.Second,
+					BackoffCoefficient: 2.0,
+					MaximumInterval:    5 * time.Second,
+				},
+			})
 
-			var fetchOutput RAGFetchOutput
-			err = workflow.ExecuteActivity(ctxRAG, "FetchChunkContentActivity", RAGFetchInput{
-				ChunkIDs: chunkIDs,
-			}).Get(ctxRAG, &fetchOutput)
+			var searchOutput RAGSearchOutput
+			err := workflow.ExecuteActivity(ctxRAG, "EmbedAndSearchChunksActivity", RAGSearchInput{
+				QueryText:  req.Query,
+				Collection: "task_embeddings",
+				Model:      req.Model,
+				TopK:       5,
+				Threshold:  0.7,
+			}).Get(ctxRAG, &searchOutput)
 
 			if err != nil {
-				logger.Warn("Leader RAG fetch failed, workers proceed without context", "error", err)
+				logger.Warn("Leader RAG search failed, workers proceed without context", "error", err)
+				_ = workflow.ExecuteActivity(hookCtx, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+					HookPoint:       hookspkg.HookPointOnError,
+					AgentID:         "",
+					WorkflowID:      req.WorkflowID,
+					TenantID:        "00000000-0000-0000-0000-000000000000",
+					SourceComponent: "swarm",
+					Payload: map[string]interface{}{
+						"error_type":      "rag_retrieval",
+						"query_text_hash": ragQueryHash,
+						"error":           err.Error(),
+					},
+				}).Get(ctx, nil)
+			} else if len(searchOutput.Hits) == 0 {
+				logger.Warn("Leader RAG search returned no hits, workers proceed without context")
+				_ = workflow.ExecuteActivity(hookCtx, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+					HookPoint:       hookspkg.HookPointOnError,
+					AgentID:         "",
+					WorkflowID:      req.WorkflowID,
+					TenantID:        "00000000-0000-0000-0000-000000000000",
+					SourceComponent: "swarm",
+					Payload: map[string]interface{}{
+						"error_type":      "rag_retrieval",
+						"query_text_hash": ragQueryHash,
+						"error":           "no search hits",
+					},
+				}).Get(ctx, nil)
 			} else {
-				var packOutput RAGPackOutput
-				err = workflow.ExecuteActivity(ctxRAG, "PackContextActivity", RAGPackInput{
-					Query:     req.Query,
-					Chunks:    fetchOutput.Chunks,
-					MaxTokens: 4000,
-				}).Get(ctxRAG, &packOutput)
+				chunkIDs := make([]string, len(searchOutput.Hits))
+				for i, h := range searchOutput.Hits {
+					chunkIDs[i] = h.ChunkID
+				}
+
+				var fetchOutput RAGFetchOutput
+				err = workflow.ExecuteActivity(ctxRAG, "FetchChunkContentActivity", RAGFetchInput{
+					ChunkIDs: chunkIDs,
+				}).Get(ctxRAG, &fetchOutput)
 
 				if err != nil {
-					logger.Warn("Leader RAG pack failed, workers proceed without context", "error", err)
+					logger.Warn("Leader RAG fetch failed, workers proceed without context", "error", err)
+					_ = workflow.ExecuteActivity(hookCtx, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+						HookPoint:       hookspkg.HookPointOnError,
+						AgentID:         "",
+						WorkflowID:      req.WorkflowID,
+						TenantID:        "00000000-0000-0000-0000-000000000000",
+						SourceComponent: "swarm",
+						Payload: map[string]interface{}{
+							"error_type":      "rag_retrieval",
+							"query_text_hash": ragQueryHash,
+							"error":           err.Error(),
+						},
+					}).Get(ctx, nil)
 				} else {
-					retrievalCtxID = fmt.Sprintf("rag-%s", req.WorkflowID)
-					retrievalCtxPacked = packOutput.Context
-					logger.Info("Leader RAG retrieval complete",
-						"chunks", len(fetchOutput.Chunks),
-						"citations", len(packOutput.Citations),
-						"context_len", len(packOutput.Context))
+					var packOutput RAGPackOutput
+					err = workflow.ExecuteActivity(ctxRAG, "PackContextActivity", RAGPackInput{
+						Query:     req.Query,
+						Chunks:    fetchOutput.Chunks,
+						MaxTokens: 4000,
+					}).Get(ctxRAG, &packOutput)
+
+					if err != nil {
+						logger.Warn("Leader RAG pack failed, workers proceed without context", "error", err)
+						_ = workflow.ExecuteActivity(hookCtx, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+							HookPoint:       hookspkg.HookPointOnError,
+							AgentID:         "",
+							WorkflowID:      req.WorkflowID,
+							TenantID:        "00000000-0000-0000-0000-000000000000",
+							SourceComponent: "swarm",
+							Payload: map[string]interface{}{
+								"error_type":      "rag_retrieval",
+								"query_text_hash": ragQueryHash,
+								"error":           err.Error(),
+							},
+						}).Get(ctx, nil)
+					} else {
+						retrievalCtxID = fmt.Sprintf("rag-%s", req.WorkflowID)
+						retrievalCtxPacked = packOutput.Context
+						ragDurationMs := workflow.Now(ctx).Sub(ragStartTime).Milliseconds()
+
+						// Emit after_tool_call hook
+						_ = workflow.ExecuteActivity(hookCtx, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+							HookPoint:       hookspkg.HookPointAfterToolCall,
+							AgentID:         "",
+							WorkflowID:      req.WorkflowID,
+							TenantID:        "00000000-0000-0000-0000-000000000000",
+							SourceComponent: "swarm",
+							Payload: map[string]interface{}{
+								"tool_type":    "rag_retrieval",
+								"hit_count":    len(fetchOutput.Chunks),
+								"context_size": len(packOutput.Context),
+								"collection":   "task_embeddings",
+								"duration_ms":  ragDurationMs,
+							},
+						}).Get(ctx, nil)
+
+						logger.Info("Leader RAG retrieval complete",
+							"chunks", len(fetchOutput.Chunks),
+							"citations", len(packOutput.Citations),
+							"context_len", len(packOutput.Context))
+					}
 				}
 			}
 		}

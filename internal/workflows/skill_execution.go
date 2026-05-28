@@ -1,6 +1,7 @@
 package workflows
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"time"
 
@@ -14,8 +15,9 @@ import (
 const SkillExecutionWorkflowName = "SkillExecutionWorkflow"
 
 type SkillExecutionWorkflowInput struct {
-	SkillName  string
-	Parameters map[string]interface{}
+	SkillName       string
+	RetrieveContext bool
+	Parameters      map[string]interface{}
 	TaskID     string
 	AgentID    string
 	WorkflowID string
@@ -67,19 +69,60 @@ func SkillExecutionWorkflow(ctx workflow.Context, input SkillExecutionWorkflowIn
 		}, nil
 	}
 
-	// Step 0.5: RAG context retrieval (if enabled via skill params)
-	if retrieveCtx, ok := input.Parameters["retrieve_context"]; ok {
-		if retrieveVal, isBool := retrieveCtx.(bool); isBool && retrieveVal {
-			delete(input.Parameters, "retrieve_context")
+	// Step 0.5: RAG context retrieval (if enabled via skill params or RetrieveContext field)
+	ragEnabled := input.RetrieveContext
+	if !ragEnabled {
+		if retrieveCtx, ok := input.Parameters["retrieve_context"]; ok {
+			if retrieveVal, isBool := retrieveCtx.(bool); isBool && retrieveVal {
+				ragEnabled = true
+				delete(input.Parameters, "retrieve_context")
+			}
+		}
+	}
 
-			queryText := input.SkillName
+	if ragEnabled {
+		ragStartTime := workflow.Now(ctx)
+		queryText := input.SkillName
+		ragQueryHash := fmt.Sprintf("%x", sha256.Sum256([]byte(queryText)))
 
+		// Before RAG tool call hook (blocking-capable)
+		var beforeHook hookspkg.EmitHookEventActivityResult
+		_ = workflow.ExecuteActivity(ao, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+			HookPoint:       hookspkg.HookPointBeforeToolCall,
+			AgentID:         input.AgentID,
+			WorkflowID:      input.WorkflowID,
+			TenantID:        "00000000-0000-0000-0000-000000000000",
+			SourceComponent: "skill",
+			Payload: map[string]interface{}{
+				"tool_type":       "rag_retrieval",
+				"query_text_hash": ragQueryHash,
+				"collection":      "task_embeddings",
+				"top_k":           5,
+			},
+		}).Get(ctx, &beforeHook)
+		if beforeHook.Decision.Denied {
+			workflow.GetLogger(ctx).Warn("RAG retrieval blocked by before_tool_call hook",
+				"reject_code", beforeHook.Decision.RejectCode,
+				"reject_reason", beforeHook.Decision.RejectReason)
+		} else {
 			var searchResult activities.EmbedAndSearchChunksOutput
 			err := workflow.ExecuteActivity(ao, "EmbedAndSearchChunksActivity", activities.EmbedAndSearchChunksInput{
 				QueryText: queryText,
 			}).Get(ctx, &searchResult)
 			if err != nil {
 				workflow.GetLogger(ctx).Warn("RAG search failed, skipping context injection", "error", err)
+				_ = workflow.ExecuteActivity(ao, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+					HookPoint:       hookspkg.HookPointOnError,
+					AgentID:         input.AgentID,
+					WorkflowID:      input.WorkflowID,
+					TenantID:        "00000000-0000-0000-0000-000000000000",
+					SourceComponent: "skill",
+					Payload: map[string]interface{}{
+						"error_type":      "rag_retrieval",
+						"query_text_hash": ragQueryHash,
+						"error":           err.Error(),
+					},
+				}).Get(ctx, nil)
 			} else if len(searchResult.Hits) > 0 {
 				chunkIDs := make([]string, len(searchResult.Hits))
 				for i, hit := range searchResult.Hits {
@@ -92,6 +135,18 @@ func SkillExecutionWorkflow(ctx workflow.Context, input SkillExecutionWorkflowIn
 				}).Get(ctx, &contentResult)
 				if err != nil {
 					workflow.GetLogger(ctx).Warn("RAG content fetch failed, skipping context injection", "error", err)
+					_ = workflow.ExecuteActivity(ao, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+						HookPoint:       hookspkg.HookPointOnError,
+						AgentID:         input.AgentID,
+						WorkflowID:      input.WorkflowID,
+						TenantID:        "00000000-0000-0000-0000-000000000000",
+						SourceComponent: "skill",
+						Payload: map[string]interface{}{
+							"error_type":      "rag_retrieval",
+							"query_text_hash": ragQueryHash,
+							"error":           err.Error(),
+						},
+					}).Get(ctx, nil)
 				} else if len(contentResult.Chunks) > 0 {
 					var packResult activities.PackContextOutput
 					err = workflow.ExecuteActivity(ao, "PackContextActivity", activities.PackContextInput{
@@ -101,8 +156,37 @@ func SkillExecutionWorkflow(ctx workflow.Context, input SkillExecutionWorkflowIn
 					}).Get(ctx, &packResult)
 					if err != nil {
 						workflow.GetLogger(ctx).Warn("RAG context pack failed, skipping context injection", "error", err)
+						_ = workflow.ExecuteActivity(ao, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+							HookPoint:       hookspkg.HookPointOnError,
+							AgentID:         input.AgentID,
+							WorkflowID:      input.WorkflowID,
+							TenantID:        "00000000-0000-0000-0000-000000000000",
+							SourceComponent: "skill",
+							Payload: map[string]interface{}{
+								"error_type":      "rag_retrieval",
+								"query_text_hash": ragQueryHash,
+								"error":           err.Error(),
+							},
+						}).Get(ctx, nil)
 					} else if packResult.Context != "" {
 						input.Parameters["context"] = packResult.Context
+						ragDurationMs := workflow.Now(ctx).Sub(ragStartTime).Milliseconds()
+
+						// Emit after_tool_call hook
+						_ = workflow.ExecuteActivity(ao, "EmitHookEventActivity", hookspkg.EmitHookEventActivityInput{
+							HookPoint:       hookspkg.HookPointAfterToolCall,
+							AgentID:         input.AgentID,
+							WorkflowID:      input.WorkflowID,
+							TenantID:        "00000000-0000-0000-0000-000000000000",
+							SourceComponent: "skill",
+							Payload: map[string]interface{}{
+								"tool_type":    "rag_retrieval",
+								"hit_count":    len(contentResult.Chunks),
+								"context_size": len(packResult.Context),
+								"collection":   "task_embeddings",
+								"duration_ms":  ragDurationMs,
+							},
+						}).Get(ctx, nil)
 					}
 				}
 			}
