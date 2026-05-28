@@ -1,5 +1,7 @@
 """Tests for llm_summary_skill"""
 import asyncio
+import os
+
 import pytest
 from llm_service.tools.builtin.llm_summary_skill import LLMSummaryTool
 
@@ -28,6 +30,24 @@ class TestLLMSummaryTool:
         result = asyncio.run(self.tool.execute(None, None, text=""))
         assert result.success is False
         assert "empty" in result.error.lower()
+
+    def test_missing_api_key_clear(self):
+        """Test that with no API keys configured, proper error is returned."""
+        saved = {}
+        for key in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY"):
+            saved[key] = os.environ.get(key)
+            os.environ.pop(key, None)
+
+        try:
+            result = asyncio.run(self.tool.execute(None, None, text="test"))
+            assert result.success is False
+            assert any(w in result.error.lower() for w in ("api", "config", "key"))
+        finally:
+            for key, val in saved.items():
+                if val is not None:
+                    os.environ[key] = val
+                else:
+                    os.environ.pop(key, None)
 
     def test_invalid_style(self):
         with pytest.raises(ValueError):
