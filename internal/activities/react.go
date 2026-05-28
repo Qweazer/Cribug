@@ -211,6 +211,28 @@ Continue until you have a final answer. Format your final answer as: FINAL: your
 			break
 		}
 
+		// Inline after_llm_call hook (non-blocking, fire-and-forget)
+		if a.hookRuntime != nil {
+			event := hookspkg.HookEvent{
+				EventID:         uuid.New().String(),
+				HookPoint:       hookspkg.HookPointAfterLLMCall,
+				AgentID:         input.TaskID,
+				WorkflowID:      "",
+				TenantID:        "00000000-0000-0000-0000-000000000000",
+				Timestamp:       time.Now().UTC(),
+				SourceComponent: "llm",
+				Payload: map[string]interface{}{
+					"model":         resp.Model,
+					"provider":      resp.Provider,
+					"token_count":   resp.Usage.TotalTokens,
+					"latency_ms":    resp.LatencyMS,
+					"finish_reason": resp.FinishReason,
+				},
+			}
+			a.hookRuntime.EmitAndExecute(ctx, event)
+			// after_llm_call is always non-blocking; ignore decision
+		}
+
 		// Parse response to extract thought/action/observation
 		thought, action, observation := parseReActResponse(resp.Content)
 
