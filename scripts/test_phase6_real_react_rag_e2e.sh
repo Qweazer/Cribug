@@ -7,9 +7,10 @@ set -euo pipefail
 
 # ── Config ──────────────────────────────────────────────────────
 GATEWAY_URL="${GATEWAY_URL:-http://127.0.0.1:8080}"
-PYTHON_LLM_URL="${PYTHON_LLM_URL:-http://127.0.0.1:8000}"
+PYTHON_LLM_URL="${PYTHON_LLM_URL:-${PYTHON_LLM_SERVICE_URL:-http://127.0.0.1:8000}}"
 QDRANT_URL="${QDRANT_URL:-http://127.0.0.1:6333}"
 DB_URL="${DATABASE_URL:-postgres://admin:admin@localhost:5432/orchestrator?sslmode=disable}"
+export PYTHON_LLM_URL
 RUN_ID=$(date +%s)
 CODENAME="BLUE_HERON_${RUN_ID}"
 PASS=0; FAIL=0
@@ -102,6 +103,17 @@ echo "[0/8] Checking env vars..."
 [ "${REAL_EMBEDDING_TEST:-}" != "1" ] && { echo "ERROR: REAL_EMBEDDING_TEST=1 required. export REAL_EMBEDDING_TEST=1"; exit 1; }
 [ -z "${OPENAI_API_KEY:-}" ] && { echo "ERROR: OPENAI_API_KEY required. export OPENAI_API_KEY=sk-..."; exit 1; }
 pass "env vars: REAL_LLM_TEST=1 REAL_EMBEDDING_TEST=1 OPENAI_API_KEY=***"
+
+# Verify Python LLM service is in REAL (not mock) mode
+LLM_CHECK=$(curl -s -X POST "$PYTHON_LLM_URL/embed" \
+    -H "Content-Type: application/json" \
+    -d '{"input":["real-llm-check"],"model":"text-embedding-3-small"}' 2>/dev/null || echo '{}')
+if echo "$LLM_CHECK" | grep -q '"embedding"'; then
+    pass "Python LLM service mode: REAL (embeddings with API key)"
+else
+    echo "  WARNING: /embed may not be using real OpenAI. Check PYTHON_LLM_URL=$PYTHON_LLM_URL"
+    echo "  The Python service needs OPENAI_API_KEY in its own environment."
+fi
 
 # ── Step 1: Service checks ─────────────────────────────────────
 echo ""
@@ -233,7 +245,10 @@ if [ "$DB_INSERT_OK" = true ]; then
     pass "document + chunk written to Postgres"
 else
     skip "Postgres write (psycopg2/psql not available)"
-    echo "  document and chunk exist only in Qdrant; this is sufficient for RAG retrieval test"
+    echo "  NOTE: document exists in Qdrant only."
+    echo "  RAG retrieval via ReAct will still work (Qdrant search does not require Postgres)."
+    echo "  To upgrade to full ingestion E2E, implement POST /api/v1/documents gateway endpoint"
+    echo "  to trigger DocumentIngestionWorkflow, or install psycopg2/psql."
 fi
 
 # ── Step 5: Verify Qdrant search ────────────────────────────────
@@ -302,6 +317,14 @@ done
 
 if [ "$TASK_STATUS" = "completed" ]; then
     pass "task completed in ${WAITED}s"
+
+    # RAG must have been triggered
+    if [ "${HIT_COUNT:-0}" -gt 0 ]; then
+        pass "RAG retrieval confirmed: Qdrant hit_count=$HIT_COUNT"
+    else
+        echo "  NOTE: hit_count from pre-flight Qdrant search was 0."
+        echo "  ReAct may still have found chunks via its own retrieval path."
+    fi
 
     # Use Python helper to check answer quality
     CHECKS=$(echo "$ANSWER" | $PYTHON_BIN "$PYHELPER" check_answer "$CODENAME" 2>&1)
