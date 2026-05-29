@@ -7,7 +7,7 @@ from openai import OpenAI
 
 def build_client(api_key: str | None = None, base_url: str | None = None) -> OpenAI | None:
     """Build an OpenAI-compatible client. Returns None if no API key is configured."""
-    key = api_key or os.environ.get("OPENAI_API_KEY") or os.environ.get("LLM_API_KEY")
+    key = api_key or os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY")
     if not key:
         return None
     url = base_url or os.environ.get("LLM_BASE_URL") or os.environ.get("OPENAI_BASE_URL")

@@ -2,12 +2,15 @@ package main
 
 import (
 	"log"
+	"time"
 
 	"cribug/internal/activities"
 	"cribug/internal/config"
 	"cribug/internal/db"
+	"cribug/internal/embeddings"
 	"cribug/internal/hooks"
 	redisclient "cribug/internal/redis"
+	"cribug/internal/vectordb"
 	"cribug/internal/workflows"
 
 	"go.temporal.io/sdk/activity"
@@ -181,6 +184,50 @@ func main() {
 		if err := activities.EnsureSandboxTables(dbClient.Stdlib()); err != nil {
 			log.Printf("[WARN] Failed to ensure sandbox tables: %v", err)
 		}
+
+	// Phase 6E: Embeddings + Qdrant + RAG
+	embedCfg := embeddings.Config{
+		BaseURL:      cfg.LLMServiceURL,
+		DefaultModel: cfg.EmbeddingModel,
+		ExpectedDim:  cfg.EmbeddingDim,
+		Timeout:      time.Duration(cfg.EmbeddingTimeoutSec) * time.Second,
+		CacheEnabled: cfg.EmbeddingCacheEnabled,
+		CacheMaxSize: cfg.EmbeddingCacheMaxSize,
+		MaxRetries:   2,
+	}
+	embedSvc := embeddings.NewService(embedCfg)
+
+	vdbCfg := vectordb.Config{
+		Host:        cfg.QdrantHost,
+		Port:        cfg.QdrantPort,
+		Scheme:      cfg.QdrantScheme,
+		Timeout:     time.Duration(cfg.QdrantTimeoutSec) * time.Second,
+		ExpectedDim: cfg.EmbeddingDim,
+	}
+	vdbClient, err := vectordb.NewClient(vdbCfg)
+	if err != nil {
+		log.Printf("[WARN] Failed to create Qdrant client: %v", err)
+	}
+
+	docRepo := db.NewDocumentRepository(dbClient.Stdlib())
+
+	// RAG retrieval activities
+	ragRetrievalActivities := activities.NewRAGRetrievalActivities(embedSvc, vdbClient, docRepo)
+	w.RegisterActivityWithOptions(ragRetrievalActivities.EmbedAndSearchChunksActivity, activity.RegisterOptions{Name: "EmbedAndSearchChunksActivity"})
+	w.RegisterActivityWithOptions(ragRetrievalActivities.FetchChunkContentActivity, activity.RegisterOptions{Name: "FetchChunkContentActivity"})
+	w.RegisterActivityWithOptions(ragRetrievalActivities.PackContextActivity, activity.RegisterOptions{Name: "PackContextActivity"})
+
+	// Ingestion activities
+	ingestionActivities := activities.NewIngestionActivities(docRepo, embedSvc, vdbClient)
+	w.RegisterActivityWithOptions(ingestionActivities.SaveDocumentMetadataActivity, activity.RegisterOptions{Name: "SaveDocumentMetadataActivity"})
+	w.RegisterActivityWithOptions(ingestionActivities.ChunkDocumentActivity, activity.RegisterOptions{Name: "ChunkDocumentActivity"})
+	w.RegisterActivityWithOptions(ingestionActivities.EmbedAndUpsertChunksActivity, activity.RegisterOptions{Name: "EmbedAndUpsertChunksActivity"})
+	w.RegisterActivityWithOptions(ingestionActivities.UpdateDocumentIndexStatusActivity, activity.RegisterOptions{Name: "UpdateDocumentIndexStatusActivity"})
+
+	// RAG workflows
+	w.RegisterWorkflowWithOptions(workflows.RAGQueryWorkflow, workflow.RegisterOptions{Name: workflows.RAGQueryWorkflowName})
+	w.RegisterWorkflowWithOptions(workflows.DocumentIngestionWorkflow, workflow.RegisterOptions{Name: workflows.DocumentIngestionWorkflowName})
+	w.RegisterWorkflowWithOptions(workflows.ResearchSynthesisWorkflow, workflow.RegisterOptions{Name: workflows.ResearchSynthesisWorkflowName})
 
 	log.Printf("worker started, task_queue=%s", cfg.TemporalTaskQueue)
 	if err := w.Run(worker.InterruptCh()); err != nil {

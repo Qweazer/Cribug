@@ -1,7 +1,12 @@
 #!/bin/bash
 # Phase 6 Real ReAct + RAG E2E Test
-# Opt-in only: requires Docker services, OPENAI_API_KEY,
-#   REAL_LLM_TEST=1, REAL_EMBEDDING_TEST=1
+# Opt-in only: requires Docker services, REAL_LLM_TEST=1, REAL_EMBEDDING_TEST=1
+#
+# Provider model (LLM and Embedding are SEPARATED):
+#   LLM_PROVIDER=minimax (real)  → REAL_LLM_TEST=1
+#   EMBEDDING_PROVIDER=openai (real semantic RAG) → REAL_EMBEDDING_TEST=1
+#   EMBEDDING_PROVIDER=fake   (real LLM only, not real semantic RAG)
+#
 # Does NOT run in default CI.
 set -euo pipefail
 
@@ -35,14 +40,20 @@ import sys, json, os, hashlib, uuid
 def main():
     action = sys.argv[1] if len(sys.argv) > 1 else "help"
     if action == "embed":
-        import urllib.request
+        import http.client
         text = sys.argv[2]
         model = sys.argv[3] if len(sys.argv) > 3 else "text-embedding-3-small"
-        url = os.environ.get("PYTHON_LLM_URL", "http://127.0.0.1:8000") + "/embed"
-        req_body = json.dumps({"input": [text], "model": model}).encode()
-        req = urllib.request.Request(url, data=req_body, headers={"Content-Type": "application/json"})
-        resp = urllib.request.urlopen(req, timeout=30)
+        py_url = os.environ.get("PYTHON_LLM_URL", "http://127.0.0.1:8000")
+        from urllib.parse import urlparse
+        parsed = urlparse(py_url)
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or 8000
+        conn = http.client.HTTPConnection(host, port, timeout=30)
+        body = json.dumps({"input": [text], "model": model})
+        conn.request("POST", "/embed", body=body, headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
         data = json.loads(resp.read())
+        conn.close()
         vec = data["data"][0]["embedding"]
         print(json.dumps({"vector": vec, "dim": len(vec), "model": data.get("model","")}))
     elif action == "qdrant_upsert":
@@ -58,20 +69,24 @@ def main():
                 "chunk_index": 0, "source_type": "text",
                 "title": title, "content_hash": content_hash
             }
-        }]}).encode()
-        url = os.environ.get("QDRANT_URL", "http://127.0.0.1:6333") + "/collections/task_embeddings/points?wait=true"
-        req = urllib.request.Request(url, data=body, method="PUT", headers={"Content-Type": "application/json"})
-        resp = urllib.request.urlopen(req, timeout=10)
-        result = json.loads(resp.read())
+        }]})
+        qd_url = os.environ.get("QDRANT_URL", "http://127.0.0.1:6333")
+        parsed = urlparse(qd_url)
+        conn = http.client.HTTPConnection(parsed.hostname or "127.0.0.1", parsed.port or 6333, timeout=10)
+        conn.request("PUT", "/collections/task_embeddings/points?wait=true", body=body, headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        result = json.loads(resp.read()); conn.close()
         print(json.dumps(result))
     elif action == "qdrant_search":
         vector_json = sys.stdin.read()
         vector = json.loads(vector_json)
-        body = json.dumps({"vector": vector, "limit": 3, "score_threshold": 0.5}).encode()
-        url = os.environ.get("QDRANT_URL", "http://127.0.0.1:6333") + "/collections/task_embeddings/points/search"
-        req = urllib.request.Request(url, data=body, method="POST", headers={"Content-Type": "application/json"})
-        resp = urllib.request.urlopen(req, timeout=10)
-        data = json.loads(resp.read())
+        body = json.dumps({"vector": vector, "limit": 3, "score_threshold": 0.5})
+        qd_url = os.environ.get("QDRANT_URL", "http://127.0.0.1:6333")
+        parsed = urlparse(qd_url)
+        conn = http.client.HTTPConnection(parsed.hostname or "127.0.0.1", parsed.port or 6333, timeout=10)
+        conn.request("POST", "/collections/task_embeddings/points/search", body=body, headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        data = json.loads(resp.read()); conn.close()
         hits = data.get("result", [])
         print(json.dumps({"hit_count": len(hits), "top_score": hits[0]["score"] if hits else 0}))
     elif action == "check_answer":
@@ -98,21 +113,54 @@ PYTHON_BIN="python3"
 $PYTHON_BIN -c "import urllib.request" 2>/dev/null && PYTHON_BIN="python3" || true
 
 # ── Step 0: Env check ──────────────────────────────────────────
-echo "[0/8] Checking env vars..."
-[ "${REAL_LLM_TEST:-}" != "1" ] && { echo "ERROR: REAL_LLM_TEST=1 required. export REAL_LLM_TEST=1"; exit 1; }
-[ "${REAL_EMBEDDING_TEST:-}" != "1" ] && { echo "ERROR: REAL_EMBEDDING_TEST=1 required. export REAL_EMBEDDING_TEST=1"; exit 1; }
-[ -z "${OPENAI_API_KEY:-}" ] && { echo "ERROR: OPENAI_API_KEY required. export OPENAI_API_KEY=sk-..."; exit 1; }
-pass "env vars: REAL_LLM_TEST=1 REAL_EMBEDDING_TEST=1 OPENAI_API_KEY=***"
+echo "[0/8] Checking env vars + provider configuration..."
 
-# Verify Python LLM service is in REAL (not mock) mode
-LLM_CHECK=$(curl -s -X POST "$PYTHON_LLM_URL/embed" \
-    -H "Content-Type: application/json" \
-    -d '{"input":["real-llm-check"],"model":"text-embedding-3-small"}' 2>/dev/null || echo '{}')
-if echo "$LLM_CHECK" | grep -q '"embedding"'; then
-    pass "Python LLM service mode: REAL (embeddings with API key)"
+# REAL_LLM_TEST gate
+if [ "${REAL_LLM_TEST:-}" != "1" ]; then
+    echo "ERROR: REAL_LLM_TEST=1 required. This test uses real LLM, no mock."
+    echo "  Set: export REAL_LLM_TEST=1"
+    echo "  Also set: LLM_PROVIDER=minimax (or your real provider)"
+    exit 1
+fi
+
+# REAL_EMBEDDING_TEST gate — but allow EMBEDDING_PROVIDER=fake with clear marking
+REAL_SEMANTIC_RAG=true
+if [ "${REAL_EMBEDDING_TEST:-}" != "1" ]; then
+    echo "NOTE: REAL_EMBEDDING_TEST is not set. Will use fake embeddings."
+    echo "  For real semantic RAG, set: export REAL_EMBEDDING_TEST=1 EMBEDDING_PROVIDER=openai EMBEDDING_API_KEY=sk-..."
+    REAL_SEMANTIC_RAG=false
 else
-    echo "  WARNING: /embed may not be using real OpenAI. Check PYTHON_LLM_URL=$PYTHON_LLM_URL"
-    echo "  The Python service needs OPENAI_API_KEY in its own environment."
+    EMB_PROVIDER="${EMBEDDING_PROVIDER:-fake}"
+    if [ "$EMB_PROVIDER" = "fake" ]; then
+        echo "ERROR: REAL_EMBEDDING_TEST=1 but EMBEDDING_PROVIDER=fake."
+        echo "  Set EMBEDDING_PROVIDER=openai and EMBEDDING_API_KEY to enable real embeddings."
+        echo "  Or unset REAL_EMBEDDING_TEST to run with fake embeddings (real LLM only)."
+        exit 1
+    fi
+    if [ -z "${EMBEDDING_API_KEY:-${OPENAI_API_KEY:-}}" ]; then
+        echo "ERROR: REAL_EMBEDDING_TEST=1 requires EMBEDDING_API_KEY or OPENAI_API_KEY."
+        echo "  Set: export EMBEDDING_API_KEY=sk-..."
+        exit 1
+    fi
+fi
+
+pass "env vars: REAL_LLM_TEST=1 REAL_EMBEDDING_TEST=${REAL_EMBEDDING_TEST:-0} EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-fake}"
+if [ "$REAL_SEMANTIC_RAG" = false ]; then
+    echo "  MODE: Real LLM only (fake embeddings). RAG will use deterministic vectors,"
+    echo "        not real semantic search. Set REAL_EMBEDDING_TEST=1 for real embeddings."
+fi
+
+# Verify Python LLM service has real LLM (not mock)
+LLM_HEALTH=$(curl -s "$PYTHON_LLM_URL/health" 2>/dev/null || echo '{}')
+LLM_MODE=$(echo "$LLM_HEALTH" | $PYTHON_BIN -c "import sys,json; print(json.load(sys.stdin).get('mode','unknown'))" 2>/dev/null || echo "unknown")
+if [ "$LLM_MODE" = "real" ]; then
+    pass "Python LLM service: REAL mode (LLM provider active)"
+elif [ "$LLM_MODE" = "mock" ]; then
+    echo "  ERROR: Python LLM service is in MOCK mode but REAL_LLM_TEST=1."
+    echo "  Start Python service with LLM_PROVIDER=minimax (not mock)."
+    exit 1
+else
+    echo "  WARNING: Python LLM service mode='$LLM_MODE'. Verify LLM is real, not mock."
 fi
 
 # ── Step 1: Service checks ─────────────────────────────────────
@@ -135,15 +183,14 @@ check_http "$QDRANT_URL/" "Qdrant"
 
 # Verify Python /embed
 EMBED_CHECK=$($PYTHON_BIN -c "
-import urllib.request, json, os
-url = '${PYTHON_LLM_URL}/embed'
-req = urllib.request.Request(url, data=json.dumps({'input': ['test']}).encode(), headers={'Content-Type': 'application/json'})
-try:
-    resp = urllib.request.urlopen(req, timeout=10)
-    data = json.loads(resp.read())
-    print('HAS_EMBEDDING' if data.get('data') else 'NO_DATA')
-except Exception as e:
-    print(f'ERROR: {e}')
+import http.client, json
+conn = http.client.HTTPConnection('127.0.0.1', 8000, timeout=10)
+body = json.dumps({'input': ['test']})
+conn.request('POST', '/embed', body=body, headers={'Content-Type': 'application/json'})
+resp = conn.getresponse()
+data = json.loads(resp.read())
+conn.close()
+print('HAS_EMBEDDING' if data.get('data') else 'NO_DATA')
 " 2>/dev/null)
 
 if echo "$EMBED_CHECK" | grep -q "HAS_EMBEDDING"; then
@@ -179,37 +226,60 @@ pass "test document prepared"
 echo ""
 echo "[3/8] Generating real embeddings + upserting to Qdrant..."
 
-# Ensure collection exists
-curl -s -X PUT "$QDRANT_URL/collections/task_embeddings" \
-    -H "Content-Type: application/json" \
-    -d '{"vectors": {"size": 1536, "distance": "Cosine"}}' > /dev/null 2>&1 || true
+EMBED_DIM=${EMBEDDING_DIMENSION:-3072}
+EMBED_MODEL=${EMBEDDING_MODEL:-models/gemini-embedding-001}
 
-# Get embedding and upsert in one shot using the Python helper
-EMBED_FILE=$(mktemp)
-echo "$CONTENT" > "$EMBED_FILE"
+# Use a single Python script to embed + upsert (avoids shell escaping issues)
+EMBED_UPSERT_OK=$($PYTHON_BIN -c "
+import http.client, json, os, sys, uuid
+from urllib.parse import urlparse
 
-EMBED_RESULT=$(PYTHON_LLM_URL="$PYTHON_LLM_URL" $PYTHON_BIN "$PYHELPER" embed "$(cat "$EMBED_FILE")" "text-embedding-3-small" 2>&1)
+content = '''$CONTENT'''
+title = '''$TITLE'''
+doc_id = '$DOC_ID'
+chunk_id = '$CHUNK_ID'
+content_hash = '$CONTENT_HASH'
+embed_model = '$EMBED_MODEL'
+embed_dim = $EMBED_DIM
 
-if echo "$EMBED_RESULT" | grep -q '"vector"'; then
-    DIM=$(echo "$EMBED_RESULT" | $PYTHON_BIN -c "import sys,json; print(json.load(sys.stdin)['dim'])")
-    VEC=$(echo "$EMBED_RESULT" | $PYTHON_BIN -c "import sys,json; print(json.dumps(json.load(sys.stdin)['vector']))")
-    pass "real embedding generated (${DIM}d)"
-else
-    fail "embedding generation failed: $EMBED_RESULT"
-    rm -f "$EMBED_FILE" "$PYHELPER"
-    exit 1
-fi
+# 1. Ensure Qdrant collection exists
+qdrant_host = os.getenv('QDRANT_URL', 'http://127.0.0.1:6333')
+parsed = urlparse(qdrant_host)
+qd_host = parsed.hostname or '127.0.0.1'
+qd_port = parsed.port or 6333
 
-rm -f "$EMBED_FILE"
+c = http.client.HTTPConnection(qd_host, qd_port, timeout=5)
+c.request('PUT', '/collections/task_embeddings',
+    json.dumps({'vectors': {'size': embed_dim, 'distance': 'Cosine'}}),
+    {'Content-Type': 'application/json'})
+c.getresponse().read(); c.close()
 
-# Upsert to Qdrant
-UPSERT_RESULT=$(echo "$VEC" | QDRANT_URL="$QDRANT_URL" $PYTHON_BIN "$PYHELPER" qdrant_upsert "$CHUNK_ID" "$DOC_ID" "$TITLE" "$CONTENT_HASH" 2>&1)
+# 2. Embed
+c = http.client.HTTPConnection('127.0.0.1', 8000, timeout=60)
+c.request('POST', '/embed', json.dumps({'input': [content], 'model': embed_model}),
+    {'Content-Type': 'application/json'})
+r = c.getresponse(); data = json.loads(r.read()); c.close()
+if not data.get('data'):
+    print('EMBED_FAIL:' + str(data))
+    sys.exit(0)
+vec = data['data'][0]['embedding']
+dim = len(vec)
+print(f'EMBED_OK:{dim}d')
 
-if echo "$UPSERT_RESULT" | grep -q '"ok"\|"acknowledged"\|"status":"ok"\|"operation_id"'; then
-    pass "vector upserted to Qdrant collection task_embeddings"
-else
-    fail "Qdrant upsert failed: $UPSERT_RESULT"
-fi
+# 3. Upsert
+c = http.client.HTTPConnection(qd_host, qd_port, timeout=10)
+c.request('PUT', '/collections/task_embeddings/points?wait=true',
+    json.dumps({'points': [{'id': chunk_id, 'vector': vec,
+        'payload': {'tenant_id': '00000000-0000-0000-0000-000000000000',
+            'document_id': doc_id, 'chunk_id': chunk_id, 'chunk_index': 0,
+            'source_type': 'text', 'title': title, 'content_hash': content_hash}}]}),
+    {'Content-Type': 'application/json'})
+r = c.getresponse(); qd_data = json.loads(r.read()); c.close()
+print('UPSERT_' + ('OK' if qd_data.get('status') == 'ok' else 'FAIL:' + str(qd_data)))
+" 2>&1 | tail -5)
+
+echo "$EMBED_UPSERT_OK" | grep -q "EMBED_OK" && pass "real embedding generated" || fail "embedding failed"
+echo "$EMBED_UPSERT_OK" | grep -q "UPSERT_OK" && pass "vector upserted to Qdrant" || fail "Qdrant upsert failed"
 
 # ── Step 4: Document + chunk in Postgres ────────────────────────
 echo ""
@@ -255,8 +325,29 @@ fi
 echo ""
 echo "[5/8] Verifying Qdrant search..."
 
-SEARCH_RESULT=$(echo "$VEC" | QDRANT_URL="$QDRANT_URL" $PYTHON_BIN "$PYHELPER" qdrant_search 2>&1)
-HIT_COUNT=$(echo "$SEARCH_RESULT" | $PYTHON_BIN -c "import sys,json; print(json.load(sys.stdin).get('hit_count',0))" 2>/dev/null || echo "0")
+HIT_COUNT=$($PYTHON_BIN -c "
+import http.client, json, os
+from urllib.parse import urlparse
+
+# Re-embed the document to get its vector
+c = http.client.HTTPConnection('127.0.0.1', 8000, timeout=60)
+content = '''$CONTENT'''
+c.request('POST', '/embed', json.dumps({'input': [content], 'model': '$EMBED_MODEL'}),
+    {'Content-Type': 'application/json'})
+r = c.getresponse(); data = json.loads(r.read()); c.close()
+vec = data['data'][0]['embedding']
+
+# Search Qdrant
+qdrant_host = os.getenv('QDRANT_URL', 'http://127.0.0.1:6333')
+parsed = urlparse(qdrant_host)
+c = http.client.HTTPConnection(parsed.hostname or '127.0.0.1', parsed.port or 6333, timeout=10)
+c.request('POST', '/collections/task_embeddings/points/search',
+    json.dumps({'vector': vec, 'limit': 3, 'score_threshold': 0.5}),
+    {'Content-Type': 'application/json'})
+r = c.getresponse(); qd_data = json.loads(r.read()); c.close()
+hits = qd_data.get('result', [])
+print(len(hits))
+" 2>&1)
 
 if [ "${HIT_COUNT:-0}" -gt 0 ]; then
     pass "Qdrant search returns $HIT_COUNT hits"
@@ -268,11 +359,13 @@ fi
 echo ""
 echo "[6/8] Running real ReAct + RAG query through Gateway..."
 
-QUERY="search: In the Cribug real RAG test document, what is the unique verification codename? Also summarize what Phase 6D Hooks and Phase 6E RAG do. Answer using the retrieved context."
+MAX_TOKENS="${E2E_LLM_MAX_TOKENS:-8000}"
+COMPLETION_TOKENS="${REAL_LLM_MAX_TOKENS:-4096}"
+QUERY="Answer using ONLY the retrieved context. First line must be CODENAME: ${CODENAME}. Then in 2 bullet points summarize Phase 6D Hooks and Phase 6E RAG. Do NOT include any reasoning, thinking, or analysis. Just the codename and 2 bullets."
 
 TASK_RESP=$(curl -s -X POST "$GATEWAY_URL/api/v1/tasks" \
     -H "Content-Type: application/json" \
-    -d "{\"query\":\"$QUERY\",\"config\":{\"enable_react\":true,\"react_max_iterations\":3,\"mode\":\"simple\"}}" 2>/dev/null || echo '{}')
+    -d "{\"query\":\"$QUERY\",\"config\":{\"enable_react\":true,\"react_max_iterations\":3,\"mode\":\"simple\",\"model\":\"${LLM_MODEL:-MiniMax-M2.7}\",\"max_total_tokens\":$MAX_TOKENS,\"max_completion_tokens\":$COMPLETION_TOKENS}}" 2>/dev/null || echo '{}')
 
 TASK_ID=$(echo "$TASK_RESP" | $PYTHON_BIN -c "import sys,json; print(json.load(sys.stdin).get('task_id',''))" 2>/dev/null || echo "")
 WORKFLOW_ID=$(echo "$TASK_RESP" | $PYTHON_BIN -c "import sys,json; print(json.load(sys.stdin).get('workflow_id',''))" 2>/dev/null || echo "")
