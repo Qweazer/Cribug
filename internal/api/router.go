@@ -56,6 +56,19 @@ func NewRouter(h *Handler) *chi.Mux {
 		r.Patch("/hooks/{hook_id}/enable", hooksH.enable)
 		r.Patch("/hooks/{hook_id}/disable", hooksH.disable)
 		r.Get("/hooks/audit", hooksH.getAudit)
+
+		// Phase 7A: Advanced Strategy Router
+		routeH := NewRouteHandler(h.temporal, h.db.Stdlib())
+		r.Post("/tasks/route", routeH.Route)
+		r.Post("/tasks/execute-routed", routeH.ExecuteRouted)
+		r.Get("/tasks/{workflow_id}/routing-decision", routeH.GetRoutingDecision)
+		r.Get("/tasks/{workflow_id}/routing-events", routeH.GetRoutingEvents)
+
+		// Phase 7B: HITL / Approval / UI Control
+		approvalH := NewApprovalHandler(h.temporal, h.db.Stdlib())
+		r.Get("/approvals/pending", approvalH.ListPending)
+		r.Get("/approvals/{approval_id}", approvalH.GetApproval)
+		r.Post("/approvals/{approval_id}/respond", approvalH.Respond)
 	})
 
 	return r

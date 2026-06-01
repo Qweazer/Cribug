@@ -15,8 +15,8 @@ import (
 
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
-	"go.temporal.io/sdk/workflow"
 	"go.temporal.io/sdk/worker"
+	"go.temporal.io/sdk/workflow"
 )
 
 func main() {
@@ -172,18 +172,43 @@ func main() {
 		log.Printf("[WARN] Failed to ensure MCP tables: %v", err)
 	}
 
-		// Phase 6B Slice 18: Sandbox Runtime
-		sandboxActivities := activities.NewSandboxActivities(dbClient, redisClient, nil)
-		w.RegisterActivityWithOptions(sandboxActivities.ExecuteSandbox, activity.RegisterOptions{Name: "ExecuteSandboxActivity"})
-		w.RegisterActivityWithOptions(sandboxActivities.AuditSandbox, activity.RegisterOptions{Name: "AuditSandboxActivity"})
-		w.RegisterActivityWithOptions(sandboxActivities.WorkspaceAppendForSandbox, activity.RegisterOptions{Name: "SandboxWorkspaceAppendActivity"})
+	// Phase 6B Slice 18: Sandbox Runtime
+	sandboxActivities := activities.NewSandboxActivities(dbClient, redisClient, nil)
+	w.RegisterActivityWithOptions(sandboxActivities.ExecuteSandbox, activity.RegisterOptions{Name: "ExecuteSandboxActivity"})
+	w.RegisterActivityWithOptions(sandboxActivities.AuditSandbox, activity.RegisterOptions{Name: "AuditSandboxActivity"})
+	w.RegisterActivityWithOptions(sandboxActivities.WorkspaceAppendForSandbox, activity.RegisterOptions{Name: "SandboxWorkspaceAppendActivity"})
 
-		sandboxWf := workflows.NewSandboxWorkflow()
-		w.RegisterWorkflowWithOptions(sandboxWf.Execute, workflow.RegisterOptions{Name: workflows.SandboxWorkflowName})
+	sandboxWf := workflows.NewSandboxWorkflow()
+	w.RegisterWorkflowWithOptions(sandboxWf.Execute, workflow.RegisterOptions{Name: workflows.SandboxWorkflowName})
 
-		if err := activities.EnsureSandboxTables(dbClient.Stdlib()); err != nil {
-			log.Printf("[WARN] Failed to ensure sandbox tables: %v", err)
-		}
+	if err := activities.EnsureSandboxTables(dbClient.Stdlib()); err != nil {
+		log.Printf("[WARN] Failed to ensure sandbox tables: %v", err)
+	}
+
+	// Phase 7A: Advanced Strategy Router
+	routerActivities := activities.NewRouterActivities(dbClient.Stdlib())
+	w.RegisterActivityWithOptions(routerActivities.ClassifyTaskComplexity, activity.RegisterOptions{Name: "ClassifyTaskComplexityActivity"})
+	w.RegisterActivityWithOptions(routerActivities.DetectTaskCapabilities, activity.RegisterOptions{Name: "DetectTaskCapabilitiesActivity"})
+	w.RegisterActivityWithOptions(routerActivities.EvaluateRoutingPolicy, activity.RegisterOptions{Name: "EvaluateRoutingPolicyActivity"})
+	w.RegisterActivityWithOptions(routerActivities.EstimateRouteCost, activity.RegisterOptions{Name: "EstimateRouteCostActivity"})
+	w.RegisterActivityWithOptions(routerActivities.AuditRoutingDecision, activity.RegisterOptions{Name: "AuditRoutingDecisionActivity"})
+	w.RegisterActivityWithOptions(routerActivities.EmitRoutingEvent, activity.RegisterOptions{Name: "EmitRoutingEventActivity"})
+	w.RegisterActivityWithOptions(routerActivities.WriteRoutingPolicyTrace, activity.RegisterOptions{Name: "WriteRoutingPolicyTraceActivity"})
+	w.RegisterActivityWithOptions(routerActivities.EvaluateApprovalPolicy, activity.RegisterOptions{Name: "EvaluateApprovalPolicyActivity"})
+	w.RegisterWorkflowWithOptions(workflows.AdvancedRoutingWorkflow, workflow.RegisterOptions{Name: workflows.AdvancedRoutingWorkflowName})
+	if err := activities.EnsureRouterTable(dbClient.Stdlib()); err != nil {
+		log.Printf("[WARN] Failed to ensure routing_audit_logs table: %v", err)
+	}
+
+	// Phase 7B: HITL / Approval
+	approvalActivities := activities.NewApprovalActivities(dbClient.Stdlib())
+	w.RegisterActivityWithOptions(approvalActivities.RequestApproval, activity.RegisterOptions{Name: "RequestApprovalActivity"})
+	w.RegisterActivityWithOptions(approvalActivities.RecordApprovalResponse, activity.RegisterOptions{Name: "RecordApprovalResponseActivity"})
+	w.RegisterActivityWithOptions(approvalActivities.MarkApprovalTimeout, activity.RegisterOptions{Name: "MarkApprovalTimeoutActivity"})
+	w.RegisterActivityWithOptions(approvalActivities.EmitApprovalEvent, activity.RegisterOptions{Name: "EmitApprovalEventActivity"})
+	if err := activities.EnsureApprovalTables(dbClient.Stdlib()); err != nil {
+		log.Printf("[WARN] Failed to ensure approval tables: %v", err)
+	}
 
 	// Phase 6E: Embeddings + Qdrant + RAG
 	embedCfg := embeddings.Config{
