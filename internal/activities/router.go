@@ -3,9 +3,11 @@ package activities
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 
+	"cribug/internal/db"
 	"cribug/internal/types"
 )
 
@@ -37,12 +39,38 @@ type ClassifyTaskComplexityResult struct {
 func (ra *RouterActivities) ClassifyTaskComplexity(ctx context.Context, input ClassifyTaskComplexityInput) (*ClassifyTaskComplexityResult, error) {
 	score := classifyHeuristic(input.Query, input.UserIntent)
 	risk := riskFromScore(score)
+	// Tag the summary with keyword-flags so the policy evaluator
+	// (which only sees the summary, not the raw query) can make
+	// mode decisions like "route to debate" without re-running the
+	// heuristic. This is a minimal, non-restructuring addition.
+	flags := classifierKeywordFlags(input.Query)
+	summary := fmt.Sprintf("complexity=%.2f risk=%s", score, risk)
+	if flags != "" {
+		summary = summary + " " + flags
+	}
 	return &ClassifyTaskComplexityResult{
 		ComplexityScore: score,
 		RiskLevel:       risk,
-		Summary:         fmt.Sprintf("complexity=%.2f risk=%s", score, risk),
+		Summary:         summary,
 		TokensUsed:      0, // heuristic uses 0 tokens
 	}, nil
+}
+
+// classifierKeywordFlags returns a space-separated list of mode-tag
+// keywords detected in the query, e.g. "kw:debate". The flags are
+// propagated via the complexity summary so downstream policy logic
+// can route by keyword without re-parsing the query.
+func classifierKeywordFlags(query string) string {
+	lower := strings.ToLower(query)
+	tags := []string{}
+	for _, kw := range []string{"比较", "对比", "vs ", "versus", "debate", "pros and cons", "trade-off",
+		"postgresql", "mongodb", "which is better", "compare"} {
+		if strings.Contains(lower, strings.ToLower(kw)) {
+			tags = append(tags, "kw:debate")
+			break
+		}
+	}
+	return strings.Join(tags, " ")
 }
 
 func classifyHeuristic(query, intent string) float64 {
@@ -100,6 +128,15 @@ func classifyHeuristic(query, intent string) float64 {
 	}
 
 	// Debate / comparison keywords
+	totKeywords := []string{"explore multiple", "multi-path", "branch", "best path", "search tree",
+		"explore paths", "find best approach", "analyze paths", "multiple perspectives"}
+	for _, kw := range totKeywords {
+		if strings.Contains(lower, kw) {
+			score += 0.30
+			break
+		}
+	}
+
 	debateKeywords := []string{"比较", "对比", "vs ", "versus", "debate", "pros and cons", "trade-off",
 		"postgresql", "mongodb", "which is better", "compare"}
 	for _, kw := range debateKeywords {
@@ -220,6 +257,7 @@ func (ra *RouterActivities) DetectTaskCapabilities(ctx context.Context, input De
 type EvaluateRoutingPolicyInput struct {
 	ComplexityScore  float64                    `json:"complexity_score"`
 	RiskLevel        string                     `json:"risk_level"`
+	ComplexitySummary string                    `json:"complexity_summary,omitempty"`
 	RequiresTools    bool                       `json:"requires_tools"`
 	RequiresSandbox  bool                       `json:"requires_sandbox"`
 	RequiresRAG      bool                       `json:"requires_rag"`
@@ -305,8 +343,23 @@ func selectPlannedMode(input EvaluateRoutingPolicyInput) types.RoutingMode {
 		return types.RouteResearchV2
 	}
 
-	// Swarm (very high complexity, multi-agent keywords detected)
-	if c >= 0.65 {
+	// ToT: multi-path exploration/comparison at high complexity (c >= 0.60, before Swarm)
+	if c >= 0.60 {
+		return types.RouteTreeOfThoughts
+	}
+
+	// Debate: comparative/argumentative query (Phase 7E Slice 27). Mirrors
+	// the ToT placement (before Swarm/DAG/Reflection). This is a
+	// minimal addition to surface the already-declared RouteDebate
+	// mode for medium complexity (0.20..0.60) when the heuristic
+	// flagged debate keywords. Full Router Strategy refactor is
+	// explicitly deferred to a later phase.
+	if c >= 0.20 && c < 0.60 && strings.Contains(strings.ToLower(input.ComplexitySummary), "debate") {
+		return types.RouteDebate
+	}
+
+	// Swarm (very high complexity with multi-agent keywords, c >= 0.70)
+	if c >= 0.70 {
 		return types.RouteSwarmWorkflow
 	}
 
@@ -315,10 +368,11 @@ func selectPlannedMode(input EvaluateRoutingPolicyInput) types.RoutingMode {
 		return types.RouteDAGWorkflow
 	}
 
-	// Reflection: medium-high complexity writing/analysis tasks
+	// Reflection: medium complexity writing/analysis tasks
 	if c >= 0.35 {
 		return types.RouteReflection
 	}
+
 
 	// ReAct (tools needed but not too complex)
 	if input.RequiresTools && c >= 0.20 {
@@ -360,10 +414,13 @@ func selectAddons(input EvaluateRoutingPolicyInput, planned types.RoutingMode) [
 // (reflection/tot/debate) return mode_disabled when their flags are off.
 func resolveExecutedMode(planned types.RoutingMode, cfg types.RouterConfigSnapshot) (types.RoutingMode, string) {
 	switch planned {
-	case types.RouteReflection:
-		if !cfg.EnableReflection {
-			return types.RouteModeDisabled, "enable_reflection=false"
-		}
+		case types.RouteReflection:
+			if !cfg.EnableReflection {
+				if cfg.EnableToT {
+					return types.RouteTreeOfThoughts, "enable_reflection=false; fallback to tree_of_thoughts"
+				}
+				return types.RouteModeDisabled, "enable_reflection=false"
+			}
 	case types.RouteTreeOfThoughts:
 		if !cfg.EnableToT {
 			return types.RouteModeDisabled, "enable_tot=false"
@@ -552,6 +609,139 @@ type WriteRoutingPolicyTraceResult struct {
 func (ra *RouterActivities) WriteRoutingPolicyTrace(ctx context.Context, input WriteRoutingPolicyTraceInput) (*WriteRoutingPolicyTraceResult, error) {
 	ref := fmt.Sprintf("router:%s:policy_trace", input.WorkflowID)
 	return &WriteRoutingPolicyTraceResult{PolicyTraceRef: ref}, nil
+}
+
+// ─── PersistRoutedExecutionResult (Phase 7E.5 async result API) ────────
+
+// PersistRoutedExecutionResultInput is the structured final result for a
+// routed workflow. The AdvancedRoutingWorkflow calls this Activity at
+// the very end of execution (success or failure) so that async
+// execute-routed clients can poll GET /api/v1/tasks/{workflow_id}/result
+// and read the final RoutedExecutionResult out of the tasks table.
+type PersistRoutedExecutionResultInput struct {
+	WorkflowID  string                 `json:"workflow_id"`
+	TaskID      string                 `json:"task_id"`
+	SessionID   string                 `json:"session_id"`
+	RunID       string                 `json:"run_id"`
+	Status      string                 `json:"status"`       // "completed" | "failed"
+	Result      *types.RoutedExecutionResult `json:"result"`  // nil for hard failure
+	ErrorType   string                 `json:"error_type,omitempty"`
+	ErrorMsg    string                 `json:"error_msg,omitempty"`
+}
+
+type PersistRoutedExecutionResultResult struct {
+	Persisted bool   `json:"persisted"`
+	TaskID    string `json:"task_id"`
+}
+
+// PersistRoutedExecutionResult writes the final RoutedExecutionResult into
+// the tasks row keyed by workflow_id. It is the bridge between
+// Temporal workflow completion and the async execute-routed polling API.
+//
+// Failure mode: if the DB write fails, the Activity returns the error to
+// the Workflow, which surfaces a structured warning in
+// RoutedExecutionResult.Metadata["persist_error"] so the polling API can
+// still answer "failed_with_persist_error" rather than hang at "running".
+func (ra *RouterActivities) PersistRoutedExecutionResult(ctx context.Context, input PersistRoutedExecutionResultInput) (*PersistRoutedExecutionResultResult, error) {
+	if ra.db == nil {
+		return nil, fmt.Errorf("router activities: db is nil")
+	}
+	if input.WorkflowID == "" {
+		return nil, fmt.Errorf("workflow_id is required")
+	}
+
+	taskStatus := "completed"
+	if input.Status == "failed" {
+		taskStatus = "failed"
+	}
+
+	resultText := ""
+	tokens := 0
+	promptTokens := 0
+	completionTokens := 0
+	model := ""
+	metadataBytes := []byte("{}")
+	if input.Result != nil {
+		resultText = input.Result.FinalAnswerText
+		tokens = input.Result.TokensUsed
+		// RoutedExecutionResult.CostUSD is float64; we keep it
+		// inside metadata.
+		// If the child workflow reported its own token counts, prefer those.
+		// (Currently the router result does not propagate the per-step
+		// counters; we still record what the RoutedExecutionResult
+		// knows about.)
+		model = input.Result.ModelUsed
+
+		// Build metadata JSON: provider / model_used / mock / llm_calls
+		// / total_tokens / mode / fallback_used / status + mode-specific
+		// nested fields. Long transcripts are NOT included; the refs are.
+		md := map[string]interface{}{
+			"provider":        input.Result.Provider,
+			"model_used":      input.Result.ModelUsed,
+			"mock":            input.Result.Mock,
+			"llm_calls":       derefIntFromMap(input.Result.Metadata, "llm_calls"),
+			"total_tokens":    input.Result.TokensUsed,
+			"cost_usd":        input.Result.CostUSD,
+			"mode":            input.Result.Mode,
+			"fallback_used":   input.Result.FallbackUsed,
+			"workflow_status": input.Result.Status,
+			"final_answer_ref": input.Result.FinalAnswerRef,
+		}
+		// Flatten Result.Metadata sub-keys (debate_*, tot_*, reflection_*).
+		if input.Result.Metadata != nil {
+			for k, v := range input.Result.Metadata {
+				md[k] = v
+			}
+		}
+		if b, err := json.Marshal(md); err == nil {
+			metadataBytes = b
+		}
+	}
+
+	upd := db.TaskResultUpdate{
+		WorkflowID:            input.WorkflowID,
+		Result:                resultText,
+		ResultStatus:          input.Status,
+		Status:                taskStatus,
+		UsagePromptTokens:     promptTokens,
+		UsageCompletionTokens: completionTokens,
+		UsageTotalTokens:      tokens,
+		Model:                 model,
+		Metadata:              metadataBytes,
+		ErrorType:             input.ErrorType,
+		ErrorMsg:              input.ErrorMsg,
+	}
+
+	if err := db.UpdateTaskResultStandalone(ctx, ra.db, upd); err != nil {
+		return nil, fmt.Errorf("persist routed result: %w", err)
+	}
+	return &PersistRoutedExecutionResultResult{
+		Persisted: true,
+		TaskID:    input.TaskID,
+	}, nil
+}
+
+// derefIntFromMap returns the int value at key k in m if it is one, else 0.
+// Used to safely extract RoutedExecutionResult.Metadata counters.
+func derefIntFromMap(m map[string]interface{}, k string) int {
+	if m == nil {
+		return 0
+	}
+	v, ok := m[k]
+	if !ok {
+		return 0
+	}
+	switch x := v.(type) {
+	case int:
+		return x
+	case int32:
+		return int(x)
+	case int64:
+		return int(x)
+	case float64:
+		return int(x)
+	}
+	return 0
 }
 
 // ─── EnsureRouterTable ─────────────────────────────────────────────────

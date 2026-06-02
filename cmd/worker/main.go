@@ -195,6 +195,7 @@ func main() {
 	w.RegisterActivityWithOptions(routerActivities.EmitRoutingEvent, activity.RegisterOptions{Name: "EmitRoutingEventActivity"})
 	w.RegisterActivityWithOptions(routerActivities.WriteRoutingPolicyTrace, activity.RegisterOptions{Name: "WriteRoutingPolicyTraceActivity"})
 	w.RegisterActivityWithOptions(routerActivities.EvaluateApprovalPolicy, activity.RegisterOptions{Name: "EvaluateApprovalPolicyActivity"})
+	w.RegisterActivityWithOptions(routerActivities.PersistRoutedExecutionResult, activity.RegisterOptions{Name: "PersistRoutedExecutionResultActivity"})
 	w.RegisterWorkflowWithOptions(workflows.AdvancedRoutingWorkflow, workflow.RegisterOptions{Name: workflows.AdvancedRoutingWorkflowName})
 	if err := activities.EnsureRouterTable(dbClient.Stdlib()); err != nil {
 		log.Printf("[WARN] Failed to ensure routing_audit_logs table: %v", err)
@@ -219,6 +220,22 @@ func main() {
 	w.RegisterActivityWithOptions(reflectionActivities.EmitReflectionEvent, activity.RegisterOptions{Name: "EmitReflectionEventActivity"})
 	w.RegisterActivityWithOptions(reflectionActivities.ResolveEffectiveLLMConfig, activity.RegisterOptions{Name: "ResolveEffectiveLLMConfigActivity"})
 	w.RegisterWorkflowWithOptions(workflows.ReflectionWorkflow, workflow.RegisterOptions{Name: workflows.ReflectionWorkflowName})
+
+	// Phase 7D: Tree-of-Thoughts
+	totActivities := activities.NewToTActivities(cfg.LLMServiceURL)
+	w.RegisterActivityWithOptions(totActivities.GenerateThoughts, activity.RegisterOptions{Name: "GenerateThoughtsActivity"})
+	w.RegisterActivityWithOptions(totActivities.ScoreThought, activity.RegisterOptions{Name: "ScoreThoughtActivity"})
+	w.RegisterActivityWithOptions(totActivities.FindBestPath, activity.RegisterOptions{Name: "FindBestPathActivity"})
+	w.RegisterActivityWithOptions(totActivities.SynthesizeToTResult, activity.RegisterOptions{Name: "SynthesizeToTResultActivity"})
+	w.RegisterWorkflowWithOptions(workflows.TreeOfThoughtsWorkflow, workflow.RegisterOptions{Name: workflows.TreeOfThoughtsWorkflowName})
+
+	// Phase 7E: Debate Mode (Slice 27)
+	debateActivities := activities.NewDebateActivities(cfg.LLMServiceURL)
+	w.RegisterActivityWithOptions(debateActivities.GenerateArguments, activity.RegisterOptions{Name: "GenerateArgumentsActivity"})
+	w.RegisterActivityWithOptions(debateActivities.JudgeDebate, activity.RegisterOptions{Name: "JudgeDebateActivity"})
+	w.RegisterActivityWithOptions(debateActivities.CheckConsensus, activity.RegisterOptions{Name: "CheckConsensusActivity"})
+	w.RegisterActivityWithOptions(debateActivities.AuditDebate, activity.RegisterOptions{Name: "AuditDebateActivity"})
+	w.RegisterWorkflowWithOptions(workflows.DebateWorkflow, workflow.RegisterOptions{Name: workflows.DebateWorkflowName})
 
 	// Phase 6E: Embeddings + Qdrant + RAG
 	embedCfg := embeddings.Config{

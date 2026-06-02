@@ -114,6 +114,11 @@ type Task struct {
 	UsageTotalTokens  sql.NullInt64   `db:"usage_total_tokens"`
 	CreatedAt         time.Time      `db:"created_at"`
 	UpdatedAt         time.Time      `db:"updated_at"`
+	// Metadata is a JSONB string carrying structured LLM metadata for
+	// routed workflows (provider / model_used / mock / llm_calls /
+	// total_tokens / debate_* / tot_* / reflection_*). Stored as raw
+	// JSON; callers parse it into a typed struct.
+	Metadata          string         `db:"metadata"`
 }
 
 func NormalizeConfig(cfg *TaskConfig) (maxTotalTokens, maxCompletionTokens int, model string, temperature float64) {

@@ -61,6 +61,7 @@ func NewRouter(h *Handler) *chi.Mux {
 		routeH := NewRouteHandler(h.temporal, h.db.Stdlib())
 		r.Post("/tasks/route", routeH.Route)
 		r.Post("/tasks/execute-routed", routeH.ExecuteRouted)
+		r.Get("/tasks/{id}/result", routeH.GetTaskResult) // Phase 7E.5 async polling
 		r.Get("/tasks/{workflow_id}/routing-decision", routeH.GetRoutingDecision)
 		r.Get("/tasks/{workflow_id}/routing-events", routeH.GetRoutingEvents)
 

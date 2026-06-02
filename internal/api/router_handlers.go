@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -125,15 +126,34 @@ func (h *RouteHandler) Route(w http.ResponseWriter, r *http.Request) {
 
 // ─── POST /api/v1/tasks/execute-routed ─────────────────────────────────
 
+// ExecuteRoutedResponse is the unified response shape for both sync and
+// async execute-routed. In async mode (HTTP 202), FinalAnswerText is
+// empty; the client polls GET /api/v1/tasks/{workflow_id}/result.
 type ExecuteRoutedResponse struct {
-	SessionID         string                `json:"session_id"`
-	WorkflowID        string                `json:"workflow_id"`
-	RunID             string                `json:"run_id"`
-	Decision          types.RoutingDecision `json:"decision"`
-	Status            string                `json:"status"`
-	FinalAnswerText   string                `json:"final_answer_text,omitempty"`
-	PendingApprovalID string                `json:"pending_approval_id,omitempty"`
-	Reason            string                `json:"reason,omitempty"`
+	SessionID         string                 `json:"session_id"`
+	TaskID            string                 `json:"task_id,omitempty"`
+	WorkflowID        string                 `json:"workflow_id"`
+	RunID             string                 `json:"run_id"`
+	Decision          types.RoutingDecision  `json:"decision"`
+	Status            string                 `json:"status"`
+	FinalAnswerText   string                 `json:"final_answer_text,omitempty"`
+	FinalAnswerRef    string                 `json:"final_answer_ref,omitempty"`
+	PendingApprovalID string                 `json:"pending_approval_id,omitempty"`
+	Reason            string                 `json:"reason,omitempty"`
+	// Async-only fields
+	Async        bool   `json:"async,omitempty"`
+	ResultURL    string `json:"result_url,omitempty"`
+	StatusURL    string `json:"status_url,omitempty"`
+	Message      string `json:"message,omitempty"`
+	// LLM metadata (sync mode mirrors what is persisted to the tasks row)
+	Provider     string                 `json:"provider,omitempty"`
+	ModelUsed    string                 `json:"model_used,omitempty"`
+	Mode         string                 `json:"mode,omitempty"`
+	Mock         bool                   `json:"mock,omitempty"`
+	FallbackUsed bool                   `json:"fallback_used,omitempty"`
+	TokensUsed   int                    `json:"tokens_used,omitempty"`
+	CostUSD      float64                `json:"cost_usd,omitempty"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 }
 
 func (h *RouteHandler) ExecuteRouted(w http.ResponseWriter, r *http.Request) {
@@ -150,10 +170,17 @@ func (h *RouteHandler) ExecuteRouted(w http.ResponseWriter, r *http.Request) {
 		req.BudgetUSD = 0.5
 	}
 
+	// Phase 7E.5 async mode: ?async=true or ?wait=false returns 202
+	// immediately and lets the client poll for the result.
+	q := r.URL.Query()
+	async := q.Get("async") == "true" || q.Get("async") == "1" || q.Get("wait") == "false"
+
 	sessionID := req.SessionID
 	if sessionID == "" {
 		sessionID = uuid.New().String()
 	}
+	// Use workflow_id as the canonical task id so the polling API
+	// (GET /api/v1/tasks/{workflow_id}/result) can find the row.
 	workflowID := "route-exec-" + uuid.New().String()
 
 	cfg := RouterConfigFromEnv()
@@ -189,9 +216,47 @@ func (h *RouteHandler) ExecuteRouted(w http.ResponseWriter, r *http.Request) {
 
 	runID := wfRun.GetRunID()
 
-	// NOTE: MVP synchronous wait — acknowledged tech debt.
-	// Future: return workflow_id immediately and let caller poll / SSE.
-	// Timeout is bounded by WorkflowExecutionTimeout above.
+	// Insert a task row in DB so async polling can read status before
+	// the workflow completes. The router workflow's
+	// PersistRoutedExecutionResultActivity will update this row when it
+	// finishes.
+	//
+	// Note: tasks.id is a UUID column; we generate a fresh UUID for
+	// the row's primary key and store the Temporal workflow_id in the
+	// separate workflow_id column (UNIQUE). The async polling API
+	// looks up by workflow_id.
+	taskID := uuid.New().String()
+	if _, dbErr := h.db.ExecContext(ctx, `
+		INSERT INTO tasks (id, session_id, query, status, workflow_id, run_id, model, max_total_tokens, max_completion_tokens, created_at, updated_at)
+		VALUES ($1, $2, $3, 'running', $4, $5, 'gpt-4o-mini', 8000, 1024, NOW(), NOW())
+		ON CONFLICT (workflow_id) DO NOTHING
+	`, taskID, sessionID, req.Query, workflowID, runID); dbErr != nil {
+		log.Printf("[WARN] insert async task row: %v", dbErr)
+	}
+
+	if async {
+		// Async mode: return 202 immediately. Do not block on
+		// wfRun.Get — that is the long-poll that triggered the
+		// original "Empty reply" failure on long-running workflows.
+		WriteJSON(w, http.StatusAccepted, ExecuteRoutedResponse{
+			SessionID:  sessionID,
+			TaskID:     taskID,
+			WorkflowID: workflowID,
+			RunID:      runID,
+			Status:     "running",
+			Async:      true,
+			ResultURL:  "/api/v1/tasks/" + taskID + "/result",
+			StatusURL:  "/api/v1/tasks/" + taskID,
+			Message:    "workflow started; poll ResultURL for completion",
+			Decision:   types.RoutingDecision{RiskLevel: "low", WorkflowType: "AdvancedRoutingWorkflow"},
+		})
+		return
+	}
+
+	// Sync mode: wait for the workflow result. For long-running
+	// workflows (Debate/Reflection/ToT/Research v2) this can still
+	// suffer the underlying HTTP long-poll problem; clients should
+	// prefer async=true.
 	var result types.RoutedExecutionResult
 	err = wfRun.Get(ctx, &result)
 	if err != nil {
@@ -201,15 +266,246 @@ func (h *RouteHandler) ExecuteRouted(w http.ResponseWriter, r *http.Request) {
 	}
 
 	WriteJSON(w, http.StatusOK, ExecuteRoutedResponse{
-		SessionID:         sessionID,
-		WorkflowID:        workflowID,
-		RunID:             runID,
-		Decision:          result.Decision,
-		Status:            result.Status,
-		FinalAnswerText:   result.FinalAnswerText,
+		SessionID:       sessionID,
+		TaskID:          taskID,
+		WorkflowID:      workflowID,
+		RunID:           runID,
+		Decision:        result.Decision,
+		Status:          result.Status,
+		FinalAnswerText: result.FinalAnswerText,
+		FinalAnswerRef:  result.FinalAnswerRef,
 		PendingApprovalID: result.PendingApprovalID,
-		Reason:            result.Reason,
+		Reason:          result.Reason,
+		Provider:        result.Provider,
+		ModelUsed:       result.ModelUsed,
+		Mode:            result.Mode,
+		Mock:            result.Mock,
+		FallbackUsed:    result.FallbackUsed,
+		TokensUsed:      result.TokensUsed,
+		CostUSD:         result.CostUSD,
+		Metadata:        result.Metadata,
 	})
+}
+
+// ─── GET /api/v1/tasks/{id}/result (Phase 7E.5 async polling) ──────────
+
+// TaskResultResponse is the body of GET /api/v1/tasks/{id}/result.
+// HTTP 202 if still running; HTTP 200 with full result if completed;
+// HTTP 200 with status="failed" if the workflow failed.
+type TaskResultResponse struct {
+	TaskID     string                 `json:"task_id"`
+	WorkflowID string                 `json:"workflow_id,omitempty"`
+	RunID      string                 `json:"run_id,omitempty"`
+	SessionID  string                 `json:"session_id,omitempty"`
+	Status     string                 `json:"status"` // "running" | "completed" | "failed"
+	Result     *types.RoutedExecutionResult `json:"result,omitempty"`
+	Error      string                 `json:"error,omitempty"`
+	ErrorType  string                 `json:"error_type,omitempty"`
+	PolledAt   time.Time              `json:"polled_at"`
+}
+
+// GetTaskResult returns the structured RoutedExecutionResult for a
+// routed workflow. Reads from the tasks row that
+// PersistRoutedExecutionResultActivity writes at the end of execution.
+//
+// Behaviour:
+//   - row not found → 404
+//   - status='running' → 202 with status="running" (poll again)
+//   - status='completed' → 200 with full result + metadata
+//   - status='failed'   → 200 with status="failed" + error message
+func (h *RouteHandler) GetTaskResult(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "id")
+	if taskID == "" {
+		WriteError(w, http.StatusBadRequest, "task id is required", types.ErrorTypeValidation)
+		return
+	}
+	ctx := r.Context()
+	task, err := h.getTaskByAnyID(ctx, taskID)
+	if err != nil {
+		log.Printf("[ERROR] get task by id: %v", err)
+		WriteError(w, http.StatusInternalServerError, "failed to get task", types.ErrorTypeDB)
+		return
+	}
+	if task == nil {
+		WriteError(w, http.StatusNotFound, "task not found", types.ErrorTypeValidation)
+		return
+	}
+
+	resp := TaskResultResponse{
+		TaskID:     task.ID,
+		WorkflowID: task.WorkflowID,
+		PolledAt:   time.Now().UTC(),
+	}
+	if task.RunID.Valid {
+		resp.RunID = task.RunID.String
+	}
+	if task.SessionID.Valid {
+		resp.SessionID = task.SessionID.String
+	}
+
+	switch task.Status {
+	case "running", "pending":
+		resp.Status = "running"
+		WriteJSON(w, http.StatusAccepted, resp)
+		return
+	case "failed":
+		resp.Status = "failed"
+		if task.Error.Valid {
+			resp.Error = task.Error.String
+		}
+		if task.ErrorType.Valid {
+			resp.ErrorType = task.ErrorType.String
+		}
+		// Try to include structured metadata so the client can see
+		// persist_error / debate_* etc. even on failure.
+		if task.Metadata != "" {
+			var md map[string]interface{}
+			if json.Unmarshal([]byte(task.Metadata), &md) == nil {
+				resp.Result = &types.RoutedExecutionResult{
+					SessionID:  resp.SessionID,
+					WorkflowID: resp.WorkflowID,
+					RunID:      resp.RunID,
+					Status:     "error",
+					Metadata:   md,
+				}
+			}
+		}
+		WriteJSON(w, http.StatusOK, resp)
+		return
+	case "completed":
+		resp.Status = "completed"
+		var result types.RoutedExecutionResult
+		result.SessionID = resp.SessionID
+		result.WorkflowID = resp.WorkflowID
+		result.RunID = resp.RunID
+		result.Status = "ok"
+		if task.Result.Valid {
+			result.FinalAnswerText = task.Result.String
+		}
+		if task.UsageTotalTokens.Valid {
+			result.TokensUsed = int(task.UsageTotalTokens.Int64)
+		}
+		if task.Model != "" {
+			result.ModelUsed = task.Model
+		}
+		if task.Metadata != "" {
+			var md map[string]interface{}
+			if json.Unmarshal([]byte(task.Metadata), &md) == nil {
+				result.Metadata = md
+				// Promote top-level metadata fields into the typed
+				// RoutedExecutionResult so clients can read them
+				// without re-parsing the metadata JSON.
+				if v, ok := md["provider"].(string); ok {
+					result.Provider = v
+				}
+				if v, ok := md["model_used"].(string); ok {
+					result.ModelUsed = v
+				}
+				if v, ok := md["mode"].(string); ok {
+					result.Mode = v
+				}
+				if v, ok := md["mock"].(bool); ok {
+					result.Mock = v
+				}
+				if v, ok := md["fallback_used"].(bool); ok {
+					result.FallbackUsed = v
+				}
+				if v, ok := md["final_answer_ref"].(string); ok {
+					result.FinalAnswerRef = v
+				}
+				if v, ok := md["cost_usd"].(float64); ok {
+					result.CostUSD = v
+				}
+			}
+		}
+		resp.Result = &result
+		WriteJSON(w, http.StatusOK, resp)
+		return
+	default:
+		// Unknown status — treat as running for safety.
+		resp.Status = task.Status
+		WriteJSON(w, http.StatusAccepted, resp)
+		return
+	}
+}
+
+// getTaskByAnyID tries to look up a task by id (UUID) or by workflow_id
+// (string). This makes the async polling API forgiving: clients may use
+// either the workflow_id returned at submit time or the task id (which
+// are equal for routed workflows). We split the two lookups because
+// `tasks.id` is UUID and `tasks.workflow_id` is VARCHAR — comparing a
+// VARCHAR input to a UUID column directly fails with
+// "operator does not exist: character varying = uuid".
+func (h *RouteHandler) getTaskByAnyID(ctx context.Context, id string) (*types.Task, error) {
+	query := `
+		SELECT id, session_id, query, status, result, error_type, error,
+			   max_total_tokens, max_completion_tokens, model, workflow_id,
+			   run_id, usage_prompt_tokens, usage_completion_tokens,
+			   usage_total_tokens, created_at, updated_at, metadata
+		FROM tasks
+		WHERE workflow_id = $1
+		LIMIT 1`
+	row := h.db.QueryRowContext(ctx, query, id)
+	t := &types.Task{}
+	var metadata sql.NullString
+	if err := row.Scan(
+		&t.ID, &t.SessionID, &t.Query, &t.Status, &t.Result, &t.ErrorType, &t.Error,
+		&t.MaxTotalTokens, &t.MaxCompletionTokens, &t.Model, &t.WorkflowID, &t.RunID,
+		&t.UsagePromptTokens, &t.UsageCompletionTokens, &t.UsageTotalTokens,
+		&t.CreatedAt, &t.UpdatedAt, &metadata,
+	); err != nil {
+		if err != sql.ErrNoRows {
+			return nil, err
+		}
+		// Fall through and try the UUID-column lookup. Guarded by a
+		// parse to avoid the type-mismatch error when the id is a
+		// workflow_id-shaped string (e.g. "route-exec-...").
+	}
+	if t.ID == "" {
+		// No match on workflow_id. Try id only if it parses as UUID.
+		if !looksLikeUUID(id) {
+			return nil, nil
+		}
+		row := h.db.QueryRowContext(ctx, `
+			SELECT id, session_id, query, status, result, error_type, error,
+				   max_total_tokens, max_completion_tokens, model, workflow_id,
+				   run_id, usage_prompt_tokens, usage_completion_tokens,
+				   usage_total_tokens, created_at, updated_at, metadata
+			FROM tasks WHERE id = $1 LIMIT 1`, id)
+		if err := row.Scan(
+			&t.ID, &t.SessionID, &t.Query, &t.Status, &t.Result, &t.ErrorType, &t.Error,
+			&t.MaxTotalTokens, &t.MaxCompletionTokens, &t.Model, &t.WorkflowID, &t.RunID,
+			&t.UsagePromptTokens, &t.UsageCompletionTokens, &t.UsageTotalTokens,
+			&t.CreatedAt, &t.UpdatedAt, &metadata,
+		); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, err
+		}
+	}
+	if metadata.Valid {
+		t.Metadata = metadata.String
+	}
+	return t, nil
+}
+
+// looksLikeUUID is a permissive check: returns true if the string is
+// 36 chars and contains dashes at the standard UUID positions. Used to
+// avoid a Postgres type error when polling by workflow_id (which is
+// not a UUID).
+func looksLikeUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, c := range s {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if c != '-' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // ─── GET /api/v1/tasks/{workflow_id}/routing-decision ──────────────────

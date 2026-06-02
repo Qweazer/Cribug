@@ -128,3 +128,150 @@ func (p *Postgres) UpdateTaskError(ctx context.Context, taskID, errorType, error
 	}
 	return nil
 }
+
+// UpdateTaskResult persists the final RoutedExecutionResult for a routed workflow.
+// Called by PersistRoutedExecutionResultActivity once the workflow completes
+// (or fails). Phase 7E.5 supports async execute-routed: clients poll
+// GET /api/v1/tasks/{id}/result which reads these columns.
+type TaskResultUpdate struct {
+	WorkflowID            string
+	Result                string  // short result preview / final answer text
+	ResultStatus          string  // "ok" | "approval_required" | "rejected" | "timeout" | "partial" | "mode_disabled" | "error"
+	Status                string  // "completed" | "failed"
+	UsagePromptTokens     int
+	UsageCompletionTokens int
+	UsageTotalTokens      int
+	Model                 string
+	Metadata              []byte  // JSONB bytes
+	ErrorType             string
+	ErrorMsg              string
+}
+
+func (p *Postgres) UpdateTaskResult(ctx context.Context, u TaskResultUpdate) error {
+	query := `
+		UPDATE tasks SET
+			status = $2,
+			result = NULLIF($3, ''),
+			error_type = NULLIF($4, ''),
+			error = NULLIF($5, ''),
+			usage_prompt_tokens = $6,
+			usage_completion_tokens = $7,
+			usage_total_tokens = $8,
+			model = COALESCE(NULLIF($9, ''), model),
+			metadata = COALESCE($10::jsonb, metadata),
+			updated_at = NOW()
+		WHERE workflow_id = $1`
+	var metaArg interface{}
+	if len(u.Metadata) > 0 {
+		metaArg = string(u.Metadata)
+	} else {
+		metaArg = nil
+	}
+	_, err := p.db.ExecContext(ctx, query,
+		u.WorkflowID,
+		u.Status,
+		u.Result,
+		u.ErrorType,
+		u.ErrorMsg,
+		u.UsagePromptTokens,
+		u.UsageCompletionTokens,
+		u.UsageTotalTokens,
+		u.Model,
+		metaArg,
+	)
+	if err != nil {
+		return fmt.Errorf("update task result: %w", err)
+	}
+	return nil
+}
+
+// GetTaskByWorkflowID looks up a task by the Temporal workflow_id (which
+// is unique per task row). This is the canonical lookup for async
+// execute-routed polling: the client receives workflow_id at submit
+// time and uses it to poll for status / result.
+func (p *Postgres) GetTaskByWorkflowID(ctx context.Context, workflowID string) (*types.Task, error) {
+	query := `
+		SELECT id, session_id, query, status, result, error_type, error,
+			   max_total_tokens, max_completion_tokens, model, workflow_id,
+			   run_id, usage_prompt_tokens, usage_completion_tokens,
+			   usage_total_tokens, created_at, updated_at, metadata
+		FROM tasks
+		WHERE workflow_id = $1`
+
+	task := &types.Task{}
+	var metadata sql.NullString
+	err := p.db.QueryRowContext(ctx, query, workflowID).Scan(
+		&task.ID,
+		&task.SessionID,
+		&task.Query,
+		&task.Status,
+		&task.Result,
+		&task.ErrorType,
+		&task.Error,
+		&task.MaxTotalTokens,
+		&task.MaxCompletionTokens,
+		&task.Model,
+		&task.WorkflowID,
+		&task.RunID,
+		&task.UsagePromptTokens,
+		&task.UsageCompletionTokens,
+		&task.UsageTotalTokens,
+		&task.CreatedAt,
+		&task.UpdatedAt,
+		&metadata,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get task by workflow_id: %w", err)
+	}
+	if metadata.Valid {
+		task.Metadata = metadata.String
+	}
+	return task, nil
+}
+
+// UpdateTaskResultStandalone is a free-function variant for callers
+// that hold a raw *sql.DB (Activities package). Mirrors
+// (*Postgres).UpdateTaskResult but does not require a Postgres wrapper.
+func UpdateTaskResultStandalone(ctx context.Context, db *sql.DB, u TaskResultUpdate) error {
+	if db == nil {
+		return fmt.Errorf("nil db")
+	}
+	query := `
+		UPDATE tasks SET
+			status = $2,
+			result = NULLIF($3, ''),
+			error_type = NULLIF($4, ''),
+			error = NULLIF($5, ''),
+			usage_prompt_tokens = $6,
+			usage_completion_tokens = $7,
+			usage_total_tokens = $8,
+			model = COALESCE(NULLIF($9, ''), model),
+			metadata = COALESCE($10::jsonb, metadata),
+			updated_at = NOW()
+		WHERE workflow_id = $1`
+	var metaArg interface{}
+	if len(u.Metadata) > 0 {
+		metaArg = string(u.Metadata)
+	} else {
+		metaArg = nil
+	}
+	_, err := db.ExecContext(ctx, query,
+		u.WorkflowID,
+		u.Status,
+		u.Result,
+		u.ErrorType,
+		u.ErrorMsg,
+		u.UsagePromptTokens,
+		u.UsageCompletionTokens,
+		u.UsageTotalTokens,
+		u.Model,
+		metaArg,
+	)
+	if err != nil {
+		return fmt.Errorf("update task result: %w", err)
+	}
+	return nil
+}

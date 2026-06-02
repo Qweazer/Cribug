@@ -79,6 +79,7 @@ func AdvancedRoutingWorkflow(ctx workflow.Context, input types.RouteRequest) (*t
 		activities.EvaluateRoutingPolicyInput{
 			ComplexityScore:  complexityResult.ComplexityScore,
 			RiskLevel:        complexityResult.RiskLevel,
+			ComplexitySummary: complexityResult.Summary,
 			RequiresTools:    capabilityResult.RequiresTools,
 			RequiresSandbox:  capabilityResult.RequiresSandbox,
 			RequiresRAG:      capabilityResult.RequiresRAG,
@@ -199,11 +200,78 @@ func AdvancedRoutingWorkflow(ctx workflow.Context, input types.RouteRequest) (*t
 	// Slice 24: Real approval flow with Temporal Signal wait.
 	// Preview only never reaches here (gated at Step 8.5).
 	if decision.RequiresApproval {
-		return executeWithApprovalGate(ctx, input, decision, workflowID, runID, capabilityResult.DetectedTools)
+		result, err := executeWithApprovalGate(ctx, input, decision, workflowID, runID, capabilityResult.DetectedTools)
+		persistRoutedResult(ctx, workflowID, runID, input.SessionID, result, err)
+		return result, err
 	}
 
 	// ── Step 10: Dispatch by mode ────────────────────────────────────
-	return dispatchByMode(ctx, input, decision, workflowID, runID)
+	result, err := dispatchByMode(ctx, input, decision, workflowID, runID)
+	persistRoutedResult(ctx, workflowID, runID, input.SessionID, result, err)
+	return result, err
+}
+
+// persistRoutedResult calls PersistRoutedExecutionResultActivity to
+// record the final RoutedExecutionResult in the tasks table. This is
+// the bridge for async execute-routed polling (Phase 7E.5).
+//
+// Non-fatal: if the persist call fails, we annotate the result with
+// metadata["persist_error"] and continue. The polling API can still
+// answer "failed_with_persist_error" instead of hanging at "running".
+func persistRoutedResult(ctx workflow.Context, workflowID, runID, sessionID string, result *types.RoutedExecutionResult, wfErr error) {
+	logger := workflow.GetLogger(ctx)
+	status := "completed"
+	errType := ""
+	errMsg := ""
+	if wfErr != nil || result == nil {
+		status = "failed"
+		if wfErr != nil {
+			errType = "workflow_error"
+			errMsg = wfErr.Error()
+		} else {
+			errType = "nil_result"
+			errMsg = "AdvancedRoutingWorkflow returned nil result"
+		}
+	}
+	if result == nil {
+		result = &types.RoutedExecutionResult{
+			SessionID:  sessionID,
+			WorkflowID: workflowID,
+			RunID:      runID,
+			Status:     status,
+		}
+	}
+	if result.Metadata == nil {
+		result.Metadata = map[string]interface{}{}
+	}
+	if status == "failed" {
+		result.Metadata["persist_error"] = errMsg
+	}
+	var err error
+	for attempt := 1; attempt <= 2; attempt++ {
+		err = workflow.ExecuteActivity(ctx, "PersistRoutedExecutionResultActivity",
+			activities.PersistRoutedExecutionResultInput{
+				WorkflowID: workflowID,
+				SessionID:  sessionID,
+				RunID:      runID,
+				Status:     status,
+				Result:     result,
+				ErrorType:  errType,
+				ErrorMsg:   errMsg,
+			},
+		).Get(ctx, nil)
+		if err == nil {
+			return
+		}
+		logger.Warn("PersistRoutedExecutionResult failed", "attempt", attempt, "error", err)
+	}
+	// Persist still failed; record warning so the polling API can
+	// surface a structured error to the client.
+	if result.Metadata == nil {
+		result.Metadata = map[string]interface{}{}
+	}
+	result.Metadata["persist_error"] = "persist_activity_failed: " + err.Error()
+	logger.Error("PersistRoutedExecutionResult permanently failed", "workflow_id", workflowID, "error", err)
 }
 
 // dispatchByMode routes to the appropriate child Workflow or returns the routing decision.
@@ -225,8 +293,12 @@ func dispatchByMode(ctx workflow.Context, input types.RouteRequest, decision typ
 		return dispatchResearchV1(ctx, input, decision, workflowID, runID)
 	case types.RouteReflection:
 		return dispatchReflection(ctx, input, decision, workflowID, runID)
-	case types.RouteTreeOfThoughts, types.RouteDebate, types.RouteResearchV2:
-		// Slice 26-28 not yet implemented
+	case types.RouteTreeOfThoughts:
+		return dispatchToT(ctx, input, decision, workflowID, runID)
+	case types.RouteDebate:
+		return dispatchDebate(ctx, input, decision, workflowID, runID)
+	case types.RouteResearchV2:
+		// Slice 28 not yet implemented
 		return &types.RoutedExecutionResult{
 			SessionID:  input.SessionID,
 			WorkflowID: workflowID,
@@ -688,6 +760,37 @@ func dispatchSwarm(ctx workflow.Context, input types.RouteRequest, decision type
 	}, nil
 }
 
+func dispatchToT(ctx workflow.Context, input types.RouteRequest, decision types.RoutingDecision, workflowID, runID string) (*types.RoutedExecutionResult, error) {
+	cwo := workflow.ChildWorkflowOptions{WorkflowID: workflowID + ":tot"}
+	cctx := workflow.WithChildOptions(ctx, cwo)
+	var result types.ToTResult
+	err := workflow.ExecuteChildWorkflow(cctx, TreeOfThoughtsWorkflowName, types.ToTWorkflowInput{
+		TaskID: workflowID, WorkflowID: workflowID, RunID: runID,
+		SessionID: input.SessionID, Query: input.Query,
+		Config: types.TreeOfThoughtsConfig{
+			MaxDepth: 2, BranchingFactor: 2, MaxTotalNodes: 8,
+			TokenBudget: 3000, PruningThreshold: 0.3,
+			EvaluationMethod: "scoring", MockLLM: false,
+			ModelTier: "small",
+		},
+	}).Get(cctx, &result)
+	if err != nil {
+		return &types.RoutedExecutionResult{
+			SessionID: input.SessionID, WorkflowID: workflowID, RunID: runID,
+			Decision: decision, Status: types.RoutedStatusError,
+			Reason: fmt.Sprintf("tot_workflow_failed: %v", err),
+		}, err
+	}
+	return &types.RoutedExecutionResult{
+		SessionID: input.SessionID, WorkflowID: workflowID, RunID: runID,
+		Decision: decision, FinalAnswerText: result.SolutionSummary,
+		Status: types.RoutedStatusOK, CostUSD: decision.CostBudgetUSD,
+		TokensUsed: result.TotalTokens,
+		Provider: result.Provider, ModelUsed: result.ModelUsed,
+		Mode: result.Mode, Mock: result.Mock, FallbackUsed: result.FallbackUsed,
+	}, nil
+}
+
 func dispatchReflection(ctx workflow.Context, input types.RouteRequest, decision types.RoutingDecision, workflowID, runID string) (*types.RoutedExecutionResult, error) {
 	cwo := workflow.ChildWorkflowOptions{
 		WorkflowID: workflowID + ":reflection",
@@ -777,5 +880,78 @@ func dispatchResearchV1(ctx workflow.Context, input types.RouteRequest, decision
 		FinalAnswerText: result.Answer,
 		Status:          types.RoutedStatusOK,
 		CostUSD:         decision.CostBudgetUSD,
+	}, nil
+}
+
+// dispatchDebate routes a debate-mode request to DebateWorkflow (Slice 27).
+// Debate is suitable for "compare / vs / pros and cons" queries. The router
+// already populates decision.Mode = debate via the heuristic keyword rules
+// (see activities/router.go). Here we just spin up the child Workflow and
+// surface its structured result.
+func dispatchDebate(ctx workflow.Context, input types.RouteRequest, decision types.RoutingDecision, workflowID, runID string) (*types.RoutedExecutionResult, error) {
+	cwo := workflow.ChildWorkflowOptions{WorkflowID: workflowID + ":debate"}
+	cctx := workflow.WithChildOptions(ctx, cwo)
+
+	// Bounded defaults for a routed debate: small model, 1-3 rounds.
+	maxRounds := 2
+	if decision.TokenBudget > 0 && decision.TokenBudget < 2000 {
+		maxRounds = 1
+	}
+
+	var result types.DebateResult
+	err := workflow.ExecuteChildWorkflow(cctx, DebateWorkflowName, types.DebateWorkflowInput{
+		TaskID:     workflowID,
+		WorkflowID: workflowID,
+		RunID:      runID,
+		SessionID:  input.SessionID,
+		Query:      input.Query,
+		Config: types.DebateConfig{
+			NumDebaters:      2,
+			MaxRounds:        maxRounds,
+			Perspectives:     []string{types.DebatePositionPro, types.DebatePositionCon},
+			ModeratorEnabled: true,
+			ModelTier:        "small",
+			RoundTimeoutSecs: 60,
+			MockLLM:          false, // Activities decide mock vs real based on profile
+		},
+	}).Get(cctx, &result)
+	if err != nil {
+		return &types.RoutedExecutionResult{
+			SessionID:  input.SessionID,
+			WorkflowID: workflowID,
+			RunID:      runID,
+			Decision:   decision,
+			Status:     types.RoutedStatusError,
+			Reason:     fmt.Sprintf("debate_workflow_failed: %v", err),
+		}, err
+	}
+
+	finalText := result.FinalAnswerText
+	if len(finalText) > 2000 {
+		finalText = truncateTo(finalText, 2000)
+	}
+	return &types.RoutedExecutionResult{
+		SessionID:       input.SessionID,
+		WorkflowID:      workflowID,
+		RunID:           runID,
+		Decision:        decision,
+		FinalAnswerRef:  result.FinalAnswerRef,
+		FinalAnswerText: finalText,
+		Status:          types.RoutedStatusOK,
+		CostUSD:         decision.CostBudgetUSD,
+		TokensUsed:      result.TotalTokens,
+		Provider:        result.Provider,
+		ModelUsed:       result.ModelUsed,
+		Mode:            result.Mode,
+		Mock:            result.Mock,
+		FallbackUsed:    result.FallbackUsed,
+		Metadata: map[string]interface{}{
+			"debate_rounds":         result.Rounds,
+			"debate_final_position": result.FinalPosition,
+			"debate_consensus":      result.ConsensusReached,
+			"debate_transcript_ref": result.TranscriptRef,
+			"debate_verdict_ref":    result.VerdictRef,
+			"debate_judge_parse":    result.JudgeParseSource,
+		},
 	}, nil
 }
