@@ -114,7 +114,13 @@ type RoutedExecutionResult struct {
 	CostUSD           float64                `json:"cost_usd"`
 	Status            string                 `json:"status"`
 	PendingApprovalID string                 `json:"pending_approval_id,omitempty"`
-	Metadata          map[string]interface{} `json:"metadata,omitempty"`
+	// LLM metadata for real-only E2E assertions (Provider Config Foundation)
+	Provider     string `json:"provider,omitempty"`
+	ModelUsed    string `json:"model_used,omitempty"`
+	Mode         string `json:"mode,omitempty"`          // "real" | "mock"
+	Mock         bool   `json:"mock,omitempty"`
+	FallbackUsed bool   `json:"fallback_used,omitempty"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 }
 
 const (

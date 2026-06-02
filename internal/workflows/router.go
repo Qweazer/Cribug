@@ -707,7 +707,7 @@ func dispatchReflection(ctx workflow.Context, input types.RouteRequest, decision
 			MinScoreThreshold:   0.75,
 			EvaluationCriteria:  []string{"clarity", "accuracy", "completeness"},
 			MockLLM:             false, // let Activities decide mock vs real
-			Model:               "gpt-4o-mini",
+			Model:               "",    // resolved via ConfigResolver in ReflectionWorkflow Step 0
 			Temperature:         0.7,
 			MaxCompletionTokens: 1024,
 		},
@@ -731,6 +731,12 @@ func dispatchReflection(ctx workflow.Context, input types.RouteRequest, decision
 		FinalAnswerText: result.FinalAnswerSummary,
 		Status:          types.RoutedStatusOK,
 		CostUSD:         decision.CostBudgetUSD,
+		TokensUsed:      result.TotalTokens,
+		Provider:        result.Provider,
+		ModelUsed:       result.ModelUsed,
+		Mode:            result.Mode,
+		Mock:            result.FallbackUsed, // "mock" == fallback was used
+		FallbackUsed:    result.FallbackUsed,
 	}, nil
 }
 
