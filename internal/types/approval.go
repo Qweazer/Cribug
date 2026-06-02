@@ -1,6 +1,30 @@
 package types
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
+
+// AllowedModifiedActionFields is the whitelist of fields that can be modified via approval.
+var AllowedModifiedActionFields = map[string]bool{
+	"mode":   true,
+	"addons": true,
+}
+
+// ValidateModifiedAction returns an error if the modified action contains non-whitelisted fields.
+func ValidateModifiedAction(action map[string]interface{}) error {
+	for k := range action {
+		if !AllowedModifiedActionFields[k] {
+			return fmt.Errorf("field %q is not in the modify whitelist (allowed: mode, addons)", k)
+		}
+	}
+	if _, ok := action["mode"]; !ok {
+		if _, ok2 := action["addons"]; !ok2 {
+			return fmt.Errorf("modified_action must contain at least one whitelisted field (mode, addons)")
+		}
+	}
+	return nil
+}
 
 // Approval status constants
 const (

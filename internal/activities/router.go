@@ -49,13 +49,19 @@ func classifyHeuristic(query, intent string) float64 {
 	lower := strings.ToLower(query)
 	score := 0.0
 
-	// Short queries are simple
-	if len(query) < 50 {
-		score += 0.1
+	// Longer queries signal more complexity
+	if len(query) < 30 {
+		score += 0.05
+	} else if len(query) > 120 {
+		score += 0.20
+	} else if len(query) > 80 {
+		score += 0.10
 	}
 
-	// Keywords indicating higher complexity
-	complexKeywords := []string{"分析", "对比", "方案", "比较", "规划", "设计", "架构", "优化"}
+	// Keywords indicating higher complexity (Chinese + English)
+	complexKeywords := []string{"分析", "对比", "方案", "比较", "规划", "设计", "架构", "优化",
+		"analyze", "compare", "design", "architecture", "optimize", "evaluate", "refactor",
+		"pros and cons", "trade-off", "calculate", "compute", "tool"}
 	for _, kw := range complexKeywords {
 		if strings.Contains(lower, kw) {
 			score += 0.15
@@ -64,7 +70,8 @@ func classifyHeuristic(query, intent string) float64 {
 	}
 
 	// Research / reporting keywords
-	researchKeywords := []string{"研究", "报告", "引用", "多源", "证据", "调研"}
+	researchKeywords := []string{"研究", "报告", "引用", "多源", "证据", "调研",
+		"research", "report", "cite", "multi-source", "evidence", "citation", "multiple sources"}
 	for _, kw := range researchKeywords {
 		if strings.Contains(lower, kw) {
 			score += 0.20
@@ -73,7 +80,8 @@ func classifyHeuristic(query, intent string) float64 {
 	}
 
 	// Sandbox / execution keywords
-	execKeywords := []string{"执行", "运行", "沙箱", "代码", "编译", "测试"}
+	execKeywords := []string{"执行", "运行", "沙箱", "代码", "编译", "测试",
+		"execute", "run ", "sandbox", "python code", "script", "compile", "wasi"}
 	for _, kw := range execKeywords {
 		if strings.Contains(lower, kw) {
 			score += 0.20
@@ -82,7 +90,8 @@ func classifyHeuristic(query, intent string) float64 {
 	}
 
 	// Multi-agent / swarm keywords
-	swarmKeywords := []string{"多agent", "多角色", "团队", "分工", "协作", "swarm"}
+	swarmKeywords := []string{"多agent", "多角色", "团队", "分工", "协作", "swarm",
+		"multi-agent", "team of agents", "collaborat", "multiple agents", "microservice"}
 	for _, kw := range swarmKeywords {
 		if strings.Contains(lower, kw) {
 			score += 0.20
@@ -90,12 +99,27 @@ func classifyHeuristic(query, intent string) float64 {
 		}
 	}
 
+	// Debate / comparison keywords
+	debateKeywords := []string{"比较", "对比", "vs ", "versus", "debate", "pros and cons", "trade-off",
+		"postgresql", "mongodb", "which is better", "compare"}
+	for _, kw := range debateKeywords {
+		if strings.Contains(lower, kw) {
+			score += 0.15
+			break
+		}
+	}
+
 	// Multi-step detection: multiple sentences or numbered lists
-	if strings.Count(query, "。") >= 2 || strings.Count(query, ".") >= 3 {
-		score += 0.10
+	periodCount := strings.Count(query, ".") + strings.Count(query, "。")
+	if periodCount >= 2 {
+		score += 0.15
 	}
 	if strings.Count(query, "\n") >= 2 {
 		score += 0.05
+	}
+	// Numbered lists (1. 2. 3. or 1) 2) 3))
+	if strings.Contains(query, "first") || strings.Contains(query, "then") || strings.Contains(query, "finally") {
+		score += 0.10
 	}
 
 	// User intent override
@@ -286,9 +310,14 @@ func selectPlannedMode(input EvaluateRoutingPolicyInput) types.RoutingMode {
 		return types.RouteSwarmWorkflow
 	}
 
-	// DAG (medium-high complexity, decomposable)
-	if c >= 0.45 {
+	// DAG (medium-high complexity, decomposable, with tools)
+	if input.RequiresTools && c >= 0.45 {
 		return types.RouteDAGWorkflow
+	}
+
+	// Reflection: medium-high complexity writing/analysis tasks
+	if c >= 0.35 {
+		return types.RouteReflection
 	}
 
 	// ReAct (tools needed but not too complex)
@@ -301,16 +330,12 @@ func selectPlannedMode(input EvaluateRoutingPolicyInput) types.RoutingMode {
 		return types.RouteRAGAnswer
 	}
 
-	// Debate / comparison keywords
-	lower := "" // TODO: pass query through; for now use complexity as proxy
-	_ = lower
-
 	// Direct answer (default)
 	return types.RouteDirectAnswer
 }
 
 func selectAddons(input EvaluateRoutingPolicyInput, planned types.RoutingMode) []types.RouteAddon {
-	var addons []types.RouteAddon
+	addons := make([]types.RouteAddon, 0) // non-nil for valid JSON
 
 	if input.RequiresRAG && planned != types.RouteRAGAnswer {
 		addons = append(addons, types.AddonRAG)
@@ -370,7 +395,7 @@ func workflowTypeForMode(mode types.RoutingMode) string {
 	case types.RouteSwarmWorkflow:
 		return "SwarmWorkflow"
 	case types.RouteReflection:
-		return "ReflectionProductionWorkflow"
+		return "ReflectionWorkflow"
 	case types.RouteTreeOfThoughts:
 		return "TreeOfThoughtsWorkflow"
 	case types.RouteDebate:

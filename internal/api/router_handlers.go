@@ -178,7 +178,7 @@ func (h *RouteHandler) ExecuteRouted(w http.ResponseWriter, r *http.Request) {
 	startOpts := client.StartWorkflowOptions{
 		TaskQueue:                "orchestrator-task-queue",
 		ID:                       workflowID,
-		WorkflowExecutionTimeout: 5 * time.Minute, // longer timeout for execution
+		WorkflowExecutionTimeout: 10 * time.Minute, // longer timeout for reflection/real LLM
 	}
 	wfRun, err := h.temporal.ExecuteWorkflow(ctx, startOpts, "AdvancedRoutingWorkflow", routeReq)
 	if err != nil {

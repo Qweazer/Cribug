@@ -150,7 +150,71 @@ func (h *ApprovalHandler) Respond(w http.ResponseWriter, r *http.Request) {
 		req.ApprovedBy = "api-user"
 	}
 
+	// Validate modified action whitelist
+	if req.ModifiedAction != nil {
+		if err := types.ValidateModifiedAction(req.ModifiedAction); err != nil {
+			WriteError(w, http.StatusBadRequest, "invalid modified_action: "+err.Error(), types.ErrorTypeValidation)
+			return
+		}
+		// Limit feedback to 500 chars for DB storage
+		if len(req.Feedback) > 500 {
+			req.Feedback = req.Feedback[:500]
+		}
+	}
+
 	ctx := r.Context()
+
+	// State validation: query DB for current approval status
+	if h.db == nil {
+		WriteError(w, http.StatusServiceUnavailable, "database not available", types.ErrorTypeDB)
+		return
+	}
+
+	var currentStatus string
+	var expiresAt time.Time
+	err := h.db.QueryRowContext(ctx,
+		"SELECT status, COALESCE(expires_at, NOW()) FROM approvals WHERE approval_id = $1",
+		approvalID,
+	).Scan(&currentStatus, &expiresAt)
+	if err == sql.ErrNoRows {
+		WriteError(w, http.StatusNotFound, "approval not found: "+approvalID, types.ErrorTypeValidation)
+		return
+	}
+	if err != nil {
+		log.Printf("[ERROR] query approval status: %v", err)
+		WriteError(w, http.StatusInternalServerError, "failed to query approval", types.ErrorTypeDB)
+		return
+	}
+
+	// Validate state: only pending approvals can be responded to
+	switch currentStatus {
+	case types.ApprovalStatusPending:
+		// OK, proceed
+	case types.ApprovalStatusApproved:
+		WriteError(w, http.StatusConflict, "approval already approved", types.ErrorTypeValidation)
+		return
+	case types.ApprovalStatusRejected:
+		WriteError(w, http.StatusConflict, "approval already rejected", types.ErrorTypeValidation)
+		return
+	case types.ApprovalStatusModified:
+		WriteError(w, http.StatusConflict, "approval already modified", types.ErrorTypeValidation)
+		return
+	case types.ApprovalStatusTimeout:
+		WriteError(w, http.StatusGone, "approval has timed out; respond after timeout is rejected", types.ErrorTypeValidation)
+		return
+	case types.ApprovalStatusCancelled:
+		WriteError(w, http.StatusGone, "approval was cancelled", types.ErrorTypeValidation)
+		return
+	default:
+		WriteError(w, http.StatusConflict, "approval status is "+currentStatus+", cannot respond", types.ErrorTypeValidation)
+		return
+	}
+
+	// Validate not expired
+	if time.Now().After(expiresAt) {
+		WriteError(w, http.StatusGone, "approval has expired; respond after timeout is rejected", types.ErrorTypeValidation)
+		return
+	}
 
 	// Send Temporal Signal to the waiting workflow
 	signalName := types.ApprovalSignalName(approvalID)
@@ -164,8 +228,7 @@ func (h *ApprovalHandler) Respond(w http.ResponseWriter, r *http.Request) {
 		ApprovedBy:     req.ApprovedBy,
 	}
 
-	err := h.temporal.SignalWorkflow(ctx, req.WorkflowID, req.RunID, signalName, signalPayload)
-	if err != nil {
+	if err := h.temporal.SignalWorkflow(ctx, req.WorkflowID, req.RunID, signalName, signalPayload); err != nil {
 		log.Printf("[ERROR] signal workflow: %v", err)
 		WriteError(w, http.StatusInternalServerError, "failed to signal workflow: "+err.Error(), types.ErrorTypeWorkflow)
 		return

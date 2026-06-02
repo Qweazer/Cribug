@@ -69,6 +69,13 @@ func NewRouter(h *Handler) *chi.Mux {
 		r.Get("/approvals/pending", approvalH.ListPending)
 		r.Get("/approvals/{approval_id}", approvalH.GetApproval)
 		r.Post("/approvals/{approval_id}/respond", approvalH.Respond)
+
+		// Provider Config Foundation: LLM provider management
+		llmCfgH := NewLLMConfigHandler(h.temporal)
+		r.Get("/llm/providers", llmCfgH.ListProviders)
+		r.Put("/llm/config", llmCfgH.SaveConfig)
+		r.Get("/llm/config/effective", llmCfgH.GetEffectiveConfig)
+		r.Post("/llm/config/test", llmCfgH.TestConfig)
 	})
 
 	return r

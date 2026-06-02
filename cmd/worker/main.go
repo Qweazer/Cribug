@@ -210,6 +210,16 @@ func main() {
 		log.Printf("[WARN] Failed to ensure approval tables: %v", err)
 	}
 
+	// Phase 7C: Reflection Mode
+	reflectionActivities := activities.NewReflectionActivities(cfg.LLMServiceURL)
+	w.RegisterActivityWithOptions(reflectionActivities.GenerateInitialDraft, activity.RegisterOptions{Name: "GenerateInitialDraftActivity"})
+	w.RegisterActivityWithOptions(reflectionActivities.EvaluateDraft, activity.RegisterOptions{Name: "EvaluateDraftActivity"})
+	w.RegisterActivityWithOptions(reflectionActivities.ReviseDraft, activity.RegisterOptions{Name: "ReviseDraftActivity"})
+	w.RegisterActivityWithOptions(reflectionActivities.AuditReflection, activity.RegisterOptions{Name: "AuditReflectionActivity"})
+	w.RegisterActivityWithOptions(reflectionActivities.EmitReflectionEvent, activity.RegisterOptions{Name: "EmitReflectionEventActivity"})
+	w.RegisterActivityWithOptions(reflectionActivities.ResolveEffectiveLLMConfig, activity.RegisterOptions{Name: "ResolveEffectiveLLMConfigActivity"})
+	w.RegisterWorkflowWithOptions(workflows.ReflectionWorkflow, workflow.RegisterOptions{Name: workflows.ReflectionWorkflowName})
+
 	// Phase 6E: Embeddings + Qdrant + RAG
 	embedCfg := embeddings.Config{
 		BaseURL:      cfg.LLMServiceURL,

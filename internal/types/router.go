@@ -123,6 +123,7 @@ const (
 	RoutedStatusApprovalRequired = "approval_required"
 	RoutedStatusRejected         = "rejected"
 	RoutedStatusTimeout          = "timeout"
+	RoutedStatusApprovalTimeout  = "approval_timeout" // approval-specific timeout; not generic workflow timeout
 	RoutedStatusPartial          = "partial"
 	RoutedStatusModeDisabled     = "mode_disabled"
 	RoutedStatusError            = "error"

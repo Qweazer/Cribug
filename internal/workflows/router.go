@@ -7,6 +7,7 @@ import (
 	"cribug/internal/activities"
 	"cribug/internal/types"
 
+	"github.com/google/uuid"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
@@ -222,15 +223,17 @@ func dispatchByMode(ctx workflow.Context, input types.RouteRequest, decision typ
 		return dispatchSwarm(ctx, input, decision, workflowID, runID)
 	case types.RouteResearchV1:
 		return dispatchResearchV1(ctx, input, decision, workflowID, runID)
-	case types.RouteReflection, types.RouteTreeOfThoughts, types.RouteDebate, types.RouteResearchV2:
-		// Slice 25-28 not yet implemented
+	case types.RouteReflection:
+		return dispatchReflection(ctx, input, decision, workflowID, runID)
+	case types.RouteTreeOfThoughts, types.RouteDebate, types.RouteResearchV2:
+		// Slice 26-28 not yet implemented
 		return &types.RoutedExecutionResult{
 			SessionID:  input.SessionID,
 			WorkflowID: workflowID,
 			RunID:      runID,
 			Decision:   decision,
 			Status:     types.RoutedStatusModeDisabled,
-			Reason:     fmt.Sprintf("mode %s not yet implemented in Slice 23", decision.Mode),
+			Reason:     fmt.Sprintf("mode %s not yet implemented", decision.Mode),
 		}, nil
 	case types.RouteModeDisabled, types.RouteNotImplemented:
 		return &types.RoutedExecutionResult{
@@ -345,7 +348,7 @@ func executeWithApprovalGate(ctx workflow.Context, input types.RouteRequest, dec
 				WorkflowID:        workflowID,
 				RunID:             runID,
 				Decision:          decision,
-				Status:            types.RoutedStatusTimeout,
+				Status:            types.RoutedStatusApprovalTimeout,
 				Reason:            "approval_timeout",
 				PendingApprovalID: approvalID,
 				FeedbackSummary:   fmt.Sprintf("Approval %s timed out after %ds", approvalID, approvalTimeoutSec),
@@ -424,8 +427,25 @@ func executeWithApprovalGate(ctx workflow.Context, input types.RouteRequest, dec
 		}, nil
 	}
 
-	// Step G: Modified → update decision fields before dispatch
+	// Step G: Modified -- validate, re-check safety, then apply
 	if signalPayload.ModifiedAction != nil {
+		// G.1: Whitelist check -- only "mode" and "addons" are modifiable
+		if err := types.ValidateModifiedAction(signalPayload.ModifiedAction); err != nil {
+			logger.Warn("Modified action validation failed", "error", err)
+			return &types.RoutedExecutionResult{
+				SessionID:         input.SessionID,
+				WorkflowID:        workflowID,
+				RunID:             runID,
+				Decision:          decision,
+				Status:            types.RoutedStatusRejected,
+				Reason:            "modification_invalid: " + err.Error(),
+				PendingApprovalID: approvalID,
+				FeedbackSummary:   signalPayload.Feedback,
+			}, nil
+		}
+
+		// G.2: Apply whitelisted modifications
+		prevMode := decision.Mode
 		if newMode, ok := signalPayload.ModifiedAction["mode"].(string); ok && newMode != "" {
 			decision.Mode = types.RoutingMode(newMode)
 		}
@@ -436,10 +456,26 @@ func executeWithApprovalGate(ctx workflow.Context, input types.RouteRequest, dec
 				}
 			}
 		}
-		decision.FallbackReason = "modified_by_approval"
+
+		// G.3: Re-check risk after modification -- must not bypass approval
+		if decision.Mode != prevMode {
+			decision.FallbackReason = "modified_by_approval"
+			if types.IsHighRiskMode(decision.Mode) || decision.RequiresSandbox {
+				return &types.RoutedExecutionResult{
+					SessionID:         input.SessionID,
+					WorkflowID:        workflowID,
+					RunID:             runID,
+					Decision:          decision,
+					Status:            types.RoutedStatusRejected,
+					Reason:            "modification_requires_re_approval",
+					PendingApprovalID: approvalID,
+					FeedbackSummary:   "Modified mode is still high-risk; re-approval not supported in Slice 24",
+				}, nil
+			}
+		}
 	}
 
-	// Step H: Approved → continue to original routed mode
+	// Step H: Approved -- continue to original (or safely modified) routed mode
 	logger.Info("Approval granted, dispatching", "approval_id", approvalID, "mode", decision.Mode)
 	return dispatchByMode(ctx, input, decision, workflowID, runID)
 }
@@ -454,7 +490,7 @@ func dispatchSimple(ctx workflow.Context, input types.RouteRequest, decision typ
 
 	var result types.WorkflowTaskResult
 	err := workflow.ExecuteChildWorkflow(cctx, "SimpleWorkflow", types.WorkflowTaskRequest{
-		TaskID:              workflowID,
+		TaskID:              uuid.New().String(),
 		Query:               input.Query,
 		SessionID:           input.SessionID,
 		Model:               "gpt-4o-mini",
@@ -532,7 +568,7 @@ func dispatchDAG(ctx workflow.Context, input types.RouteRequest, decision types.
 
 	var result types.WorkflowTaskResult
 	err := workflow.ExecuteChildWorkflow(cctx, DAGWorkflowName, types.WorkflowTaskRequest{
-		TaskID:              workflowID,
+		TaskID:              uuid.New().String(),
 		Query:               input.Query,
 		SessionID:           input.SessionID,
 		Model:               "gpt-4o-mini",
@@ -652,6 +688,52 @@ func dispatchSwarm(ctx workflow.Context, input types.RouteRequest, decision type
 	}, nil
 }
 
+func dispatchReflection(ctx workflow.Context, input types.RouteRequest, decision types.RoutingDecision, workflowID, runID string) (*types.RoutedExecutionResult, error) {
+	cwo := workflow.ChildWorkflowOptions{
+		WorkflowID: workflowID + ":reflection",
+	}
+	cctx := workflow.WithChildOptions(ctx, cwo)
+
+	var result types.ReflectionResult
+	err := workflow.ExecuteChildWorkflow(cctx, ReflectionWorkflowName, types.ReflectionRequest{
+		TaskID:       workflowID,
+		WorkflowID:   workflowID,
+		RunID:        runID,
+		SessionID:    input.SessionID,
+		Query:        input.Query,
+		RouterConfig: input.RouterConfig,
+		Config: types.ReflectionConfig{
+			MaxIterations:       2,
+			MinScoreThreshold:   0.75,
+			EvaluationCriteria:  []string{"clarity", "accuracy", "completeness"},
+			MockLLM:             false, // let Activities decide mock vs real
+			Model:               "gpt-4o-mini",
+			Temperature:         0.7,
+			MaxCompletionTokens: 1024,
+		},
+	}).Get(cctx, &result)
+	if err != nil {
+		return &types.RoutedExecutionResult{
+			SessionID:  input.SessionID,
+			WorkflowID: workflowID,
+			RunID:      runID,
+			Decision:   decision,
+			Status:     types.RoutedStatusError,
+			Reason:     fmt.Sprintf("reflection_workflow_failed: %v", err),
+		}, err
+	}
+
+	return &types.RoutedExecutionResult{
+		SessionID:       input.SessionID,
+		WorkflowID:      workflowID,
+		RunID:           runID,
+		Decision:        decision,
+		FinalAnswerText: result.FinalAnswerSummary,
+		Status:          types.RoutedStatusOK,
+		CostUSD:         decision.CostBudgetUSD,
+	}, nil
+}
+
 func dispatchResearchV1(ctx workflow.Context, input types.RouteRequest, decision types.RoutingDecision, workflowID, runID string) (*types.RoutedExecutionResult, error) {
 	cwo := workflow.ChildWorkflowOptions{
 		WorkflowID: workflowID + ":research",
@@ -660,7 +742,7 @@ func dispatchResearchV1(ctx workflow.Context, input types.RouteRequest, decision
 
 	var result types.WorkflowTaskResult
 	err := workflow.ExecuteChildWorkflow(cctx, ResearchSynthesisWorkflowName, types.WorkflowTaskRequest{
-		TaskID:              workflowID,
+		TaskID:              uuid.New().String(),
 		Query:               input.Query,
 		SessionID:           input.SessionID,
 		Model:               "gpt-4o-mini",

@@ -114,10 +114,10 @@ func (aa *ApprovalActivities) RecordApprovalResponse(ctx context.Context, input 
 		_, err = aa.db.ExecContext(ctx, `
 			INSERT INTO approval_audit_logs
 				(approval_id, workflow_id, query, risk_level, approved,
-				 feedback, approved_by, duration_ms, status)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+				 feedback_summary, feedback_ref, approved_by, duration_ms, status)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
 			input.ApprovalID, input.WorkflowID, "", "",
-			approvedPtr, input.Feedback, input.ApprovedBy,
+			approvedPtr, truncate(input.Feedback, 500), input.FeedbackRef, input.ApprovedBy,
 			durationMs, status,
 		)
 		if err != nil {
@@ -155,10 +155,10 @@ func (aa *ApprovalActivities) MarkApprovalTimeout(ctx context.Context, input Mar
 		_, err = aa.db.ExecContext(ctx, `
 			INSERT INTO approval_audit_logs
 				(approval_id, workflow_id, query, risk_level, approved,
-				 feedback, approved_by, duration_ms, status)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+				 feedback_summary, feedback_ref, approved_by, duration_ms, status)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
 			input.ApprovalID, input.WorkflowID, "", "",
-			nil, "", "", 0, types.ApprovalStatusTimeout,
+			nil, "", "", "", 0, types.ApprovalStatusTimeout,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("write timeout audit: %w", err)
@@ -178,12 +178,21 @@ type EmitApprovalEventInput struct {
 	ApprovedBy string `json:"approved_by,omitempty"`
 }
 
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen]
+}
+
 func (aa *ApprovalActivities) EmitApprovalEvent(ctx context.Context, input EmitApprovalEventInput) error {
 	// Slice 24 MVP: no-op. Will be wired to Redis SSE when event infrastructure matures.
 	return nil
 }
 
-// ─── EnsureApprovalTables ───────────────────────────────────────────────
+// ─── EnsureApprovalTables (DEV/TEST ONLY) ──────────────────────────────
+// DEV/TEST ONLY: auto-creates tables on worker start.
+// Production MUST use migrations/011 and 012.
 
 func EnsureApprovalTables(db *sql.DB) error {
 	if db == nil {
