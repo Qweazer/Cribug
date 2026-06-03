@@ -62,6 +62,11 @@ func NewRouter(h *Handler) *chi.Mux {
 		r.Post("/tasks/route", routeH.Route)
 		r.Post("/tasks/execute-routed", routeH.ExecuteRouted)
 		r.Get("/tasks/{id}/result", routeH.GetTaskResult) // Phase 7E.5 async polling
+		r.Post("/tasks/{id}/approve", routeH.ApproveTask)  // Phase 7F Approval UX
+		r.Post("/tasks/{id}/reject", routeH.RejectTask)     // Phase 7F Approval UX
+		r.Get("/workspace", routeH.GetWorkspaceByRef)        // Phase 7G Workspace Store
+		r.Get("/workspace/{id}", routeH.GetWorkspaceByID)    // Phase 7G Workspace Store
+		r.Get("/tasks/{id}/workspace", routeH.ListTaskWorkspace) // Phase 7G
 		r.Get("/tasks/{workflow_id}/routing-decision", routeH.GetRoutingDecision)
 		r.Get("/tasks/{workflow_id}/routing-events", routeH.GetRoutingEvents)
 

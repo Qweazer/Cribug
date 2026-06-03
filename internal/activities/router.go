@@ -693,6 +693,25 @@ func (ra *RouterActivities) PersistRoutedExecutionResult(ctx context.Context, in
 				md[k] = v
 			}
 		}
+		// Phase 7J: Emit typed ToT fields for smoke persistence.
+		if input.Result.TotalThoughts > 0 {
+			md["total_thoughts"] = input.Result.TotalThoughts
+		}
+		if input.Result.TreeDepth > 0 {
+			md["tree_depth"] = input.Result.TreeDepth
+		}
+		if input.Result.BestPathCount > 0 {
+			md["best_path_count"] = input.Result.BestPathCount
+		}
+		if input.Result.SolutionRef != "" {
+			md["solution_ref"] = input.Result.SolutionRef
+		}
+		if input.Result.ExplorationRef != "" {
+			md["exploration_tree_ref"] = input.Result.ExplorationRef
+		}
+		if input.Result.ToTConfidence > 0 {
+			md["confidence"] = input.Result.ToTConfidence
+		}
 		if b, err := json.Marshal(md); err == nil {
 			metadataBytes = b
 		}
@@ -744,6 +763,33 @@ func derefIntFromMap(m map[string]interface{}, k string) int {
 	return 0
 }
 
+// ─── UpdateTaskApprovalStatus (Phase 7F Approval UX) ──────────────────
+
+type UpdateTaskApprovalStatusInput struct {
+	WorkflowID  string `json:"workflow_id"`
+	Status      string `json:"status"`
+	ApprovalID  string `json:"approval_id,omitempty"`
+	ApprovalURL string `json:"approval_url,omitempty"`
+	RiskLevel   string `json:"risk_level,omitempty"`
+	Mode        string `json:"mode,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+}
+
+type UpdateTaskApprovalStatusResult struct{ Updated bool `json:"updated"` }
+
+func (ra *RouterActivities) UpdateTaskApprovalStatus(ctx context.Context, input UpdateTaskApprovalStatusInput) (*UpdateTaskApprovalStatusResult, error) {
+	if ra.db == nil { return nil, fmt.Errorf("db is nil") }
+	md, _ := json.Marshal(map[string]interface{}{
+		"approval_id": input.ApprovalID, "approval_url": input.ApprovalURL,
+		"approval_risk": input.RiskLevel, "approval_mode": input.Mode,
+		"approval_reason": input.Reason, "approval_status": input.Status,
+	})
+	_ = db.UpdateTaskResultStandalone(ctx, ra.db, db.TaskResultUpdate{
+		WorkflowID: input.WorkflowID, Status: input.Status, Metadata: md,
+	})
+	return &UpdateTaskApprovalStatusResult{Updated: true}, nil
+}
+
 // ─── EnsureRouterTable ─────────────────────────────────────────────────
 
 func EnsureRouterTable(db *sql.DB) error {
@@ -793,6 +839,10 @@ type EvaluateApprovalPolicyInput struct {
 	Mode            string   `json:"mode"`
 	RequiresSandbox bool     `json:"requires_sandbox"`
 	RequiresPublish bool     `json:"requires_publish"`
+	// RequireApproval is a test-only kill switch: when false, the
+	// approval gate is disabled for this routed execution. Set from
+	// RouterConfigSnapshot.RequireApproval (env ROUTER_REQUIRE_APPROVAL).
+	RequireApproval bool `json:"require_approval"`
 }
 
 type EvaluateApprovalPolicyResult struct {
@@ -802,6 +852,14 @@ type EvaluateApprovalPolicyResult struct {
 }
 
 func (ra *RouterActivities) EvaluateApprovalPolicy(ctx context.Context, input EvaluateApprovalPolicyInput) (*EvaluateApprovalPolicyResult, error) {
+	// Test-only kill switch: ROUTER_REQUIRE_APPROVAL=false disables the
+	// approval gate. Production default is true.
+	if !input.RequireApproval {
+		return &EvaluateApprovalPolicyResult{
+			Required: false, Reason: "require_approval=false (test/smoke override)",
+			RiskLevel: input.RiskLevel,
+		}, nil
+	}
 	required := false
 	reason := ""
 

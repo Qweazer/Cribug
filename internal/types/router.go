@@ -51,6 +51,13 @@ type RouterConfigSnapshot struct {
 	EnableToT        bool `json:"enable_tot"`
 	EnableDebate     bool `json:"enable_debate"`
 	EnableResearchV2 bool `json:"enable_research_v2"`
+
+	// RequireApproval controls the Slice 24 HITL approval gate.
+	// Default true (production). Test/smoke environments can set
+	// ROUTER_REQUIRE_APPROVAL=false to allow async workflows to
+	// complete without a human signal. This is a *test-only*
+	// configuration knob; production traffic should leave it on.
+	RequireApproval bool `json:"require_approval"`
 }
 
 // RouteRequest is the input to AdvancedRoutingWorkflow.
@@ -117,10 +124,26 @@ type RoutedExecutionResult struct {
 	// LLM metadata for real-only E2E assertions (Provider Config Foundation)
 	Provider     string `json:"provider,omitempty"`
 	ModelUsed    string `json:"model_used,omitempty"`
-	Mode         string `json:"mode,omitempty"`          // "real" | "mock"
-	Mock         bool   `json:"mock,omitempty"`
+	Mode         string `json:"mode,omitempty"`  // "real" | "mock"
+	// Mock is a real JSON boolean (NOT omitempty) so the API result
+	// body always carries an explicit true/false. This avoids
+	// downstream smoke scripts having to distinguish "missing" from
+	// "false" — Phase 7E.6 polish.
+	Mock         bool   `json:"mock"`
 	FallbackUsed bool   `json:"fallback_used,omitempty"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	// LLMCalls is the total number of real LLM round-trips made by
+	// the routed workflow (Pro/Con/Judge for Debate, Generate/Score
+	// for ToT, etc.). Populated by the dispatch helpers. Phase 7E.6.
+	LLMCalls  int                    `json:"llm_calls"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	// Mode-specific typed fields (Phase 7J). These survive Temporal
+	// serialization better than map[string]interface{} values.
+	TotalThoughts   int    `json:"total_thoughts,omitempty"`    // ToT
+	TreeDepth       int    `json:"tree_depth,omitempty"`        // ToT
+	BestPathCount   int    `json:"best_path_count,omitempty"`   // ToT
+	SolutionRef     string `json:"solution_ref,omitempty"`      // ToT
+	ExplorationRef  string `json:"exploration_tree_ref,omitempty"` // ToT
+	ToTConfidence   float64 `json:"tot_confidence,omitempty"`   // ToT
 }
 
 const (

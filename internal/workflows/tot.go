@@ -208,6 +208,15 @@ func TreeOfThoughtsWorkflow(ctx workflow.Context, input types.ToTWorkflowInput) 
 	if usedMode == "" {
 		usedMode = "mock"
 	}
+	llmCalls := 0
+	if usedMode != "mock" {
+		// Real mode: count the actual LLM activities we ran.
+		// One generate + one score per non-root thought, plus
+		// one synthesis call.
+		if len(allNodes) > 1 {
+			llmCalls = (len(allNodes)-1)*2 + 1
+		}
+	}
 
 	return &types.ToTResult{
 		BestPath:           bestPathResult.BestPath,
@@ -224,6 +233,7 @@ func TreeOfThoughtsWorkflow(ctx workflow.Context, input types.ToTWorkflowInput) 
 		Mode:               usedMode,
 		Mock:               usedMode == "mock",
 		FallbackUsed:       false,
+		LLMCalls:           llmCalls,
 	}, nil
 }
 

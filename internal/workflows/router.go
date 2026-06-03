@@ -139,6 +139,10 @@ func AdvancedRoutingWorkflow(ctx workflow.Context, input types.RouteRequest) (*t
 			Mode:            string(decision.Mode),
 			RequiresSandbox: decision.RequiresSandbox,
 			RequiresPublish: decision.RequiresResearchV2,
+			// Test-only override: ROUTER_REQUIRE_APPROVAL=false in
+			// the gateway env disables the gate so async workflows
+			// can complete without a human signal. Default true.
+			RequireApproval: input.RouterConfig.RequireApproval,
 		},
 	).Get(ctx, &approvalEval)
 
@@ -298,15 +302,7 @@ func dispatchByMode(ctx workflow.Context, input types.RouteRequest, decision typ
 	case types.RouteDebate:
 		return dispatchDebate(ctx, input, decision, workflowID, runID)
 	case types.RouteResearchV2:
-		// Slice 28 not yet implemented
-		return &types.RoutedExecutionResult{
-			SessionID:  input.SessionID,
-			WorkflowID: workflowID,
-			RunID:      runID,
-			Decision:   decision,
-			Status:     types.RoutedStatusModeDisabled,
-			Reason:     fmt.Sprintf("mode %s not yet implemented", decision.Mode),
-		}, nil
+		return dispatchResearchV2(ctx, input, decision, workflowID, runID)
 	case types.RouteModeDisabled, types.RouteNotImplemented:
 		return &types.RoutedExecutionResult{
 			SessionID:  input.SessionID,
@@ -382,6 +378,20 @@ func executeWithApprovalGate(ctx workflow.Context, input types.RouteRequest, dec
 			ApprovalID: approvalID,
 			EventType:  "APPROVAL_REQUESTED",
 			Status:     types.ApprovalStatusPending,
+		},
+	).Get(actx, nil)
+
+	// Step B.5: Update the tasks row to "waiting_for_approval" so the
+	// async poll API returns approval details instead of "running".
+	_ = workflow.ExecuteActivity(actx, "UpdateTaskApprovalStatusActivity",
+		activities.UpdateTaskApprovalStatusInput{
+			WorkflowID:  workflowID,
+			Status:      "waiting_for_approval",
+			ApprovalID:  approvalID,
+			ApprovalURL: "/api/v1/tasks/" + workflowID + "/result",
+			RiskLevel:   decision.RiskLevel,
+			Mode:        string(decision.Mode),
+			Reason:      decision.Reason,
 		},
 	).Get(actx, nil)
 
@@ -784,10 +794,30 @@ func dispatchToT(ctx workflow.Context, input types.RouteRequest, decision types.
 	return &types.RoutedExecutionResult{
 		SessionID: input.SessionID, WorkflowID: workflowID, RunID: runID,
 		Decision: decision, FinalAnswerText: result.SolutionSummary,
+		FinalAnswerRef: result.SolutionRef,
 		Status: types.RoutedStatusOK, CostUSD: decision.CostBudgetUSD,
 		TokensUsed: result.TotalTokens,
 		Provider: result.Provider, ModelUsed: result.ModelUsed,
 		Mode: result.Mode, Mock: result.Mock, FallbackUsed: result.FallbackUsed,
+		LLMCalls: result.LLMCalls,
+		// Typed ToT fields (Phase 7J) — survive serialization better
+		// than map[string]interface{} metadata sub-keys.
+		TotalThoughts:  result.TotalThoughts,
+		TreeDepth:      result.TreeDepth,
+		BestPathCount:  len(result.BestPath),
+		SolutionRef:    result.SolutionRef,
+		ExplorationRef: result.ExplorationTreeRef,
+		ToTConfidence:  result.Confidence,
+		Metadata: map[string]interface{}{
+			"llm_calls":             result.LLMCalls,
+			"total_thoughts":        result.TotalThoughts,
+			"tree_depth":            result.TreeDepth,
+			"best_path":             result.BestPath,
+			"solution_ref":          result.SolutionRef,
+			"exploration_tree_ref":  result.ExplorationTreeRef,
+			"confidence":            result.Confidence,
+			"pruned_count":          result.PrunedCount,
+		},
 	}, nil
 }
 
@@ -943,15 +973,103 @@ func dispatchDebate(ctx workflow.Context, input types.RouteRequest, decision typ
 		Provider:        result.Provider,
 		ModelUsed:       result.ModelUsed,
 		Mode:            result.Mode,
+		// Promote the boolean into the typed field. RoutedExecutionResult
+		// treats mock as a proper JSON bool (Phase 7E.6 polish).
+		Mock:         result.Mock,
+		FallbackUsed: result.FallbackUsed,
+		LLMCalls:     result.LLMCalls,
+		Metadata: map[string]interface{}{
+			"llm_calls":                result.LLMCalls,
+			"debate_rounds":            result.Rounds,
+			"debate_final_position":    result.FinalPosition,
+			"debate_consensus":         result.ConsensusReached,
+			"debate_transcript_ref":    result.TranscriptRef,
+			"debate_verdict_ref":       result.VerdictRef,
+			"debate_judge_parse":       result.JudgeParseSource,
+			"debate_confidence_source": result.ConfidenceSource,
+		},
+	}, nil
+}
+
+// dispatchResearchV2 routes a research-v2 request to
+// ResearchSynthesisV2Workflow (Phase 7F Slice 28). Multi-source
+// retrieval, credibility scoring, contradiction detection, citation
+// chain, and optional reflection/debate are computed in Activities.
+// Workflow result only carries refs + short metadata.
+func dispatchResearchV2(ctx workflow.Context, input types.RouteRequest, decision types.RoutingDecision, workflowID, runID string) (*types.RoutedExecutionResult, error) {
+	cwo := workflow.ChildWorkflowOptions{WorkflowID: workflowID + ":research_v2"}
+	cctx := workflow.WithChildOptions(ctx, cwo)
+
+	// Bounded defaults for a routed research v2: small model, 1
+	// iteration, few sources. Real LLM smoke uses these to stay within
+	// the cost cap.
+	maxSources := 3
+	if decision.TokenBudget >= 4000 {
+		maxSources = 4
+	}
+
+	var result types.ResearchV2WorkflowResult
+	err := workflow.ExecuteChildWorkflow(cctx, ResearchSynthesisV2WorkflowName, types.ResearchV2WorkflowInput{
+		TaskID:     workflowID,
+		WorkflowID: workflowID,
+		RunID:      runID,
+		SessionID:  input.SessionID,
+		Query:      input.Query,
+		Config: types.ResearchV2Config{
+			MaxSources:                    maxSources,
+			MaxEvidenceItems:              10,
+			MaxSubqueries:                 3,
+			MaxIterations:                 1,
+			TokenBudget:                   decision.TokenBudget,
+			CredibilityThreshold:          0.4,
+			EnableContradictionDetection:  true,
+			RequireCitations:              true,
+			RequireApprovalBeforePublish:  false,
+			SourceTypes:                   []string{types.SourceTypeLocalRAG},
+			ModelTier:                     "small",
+			MockLLM:                       false, // Activities decide mock vs real
+		},
+	}).Get(cctx, &result)
+	if err != nil {
+		return &types.RoutedExecutionResult{
+			SessionID:  input.SessionID,
+			WorkflowID: workflowID,
+			RunID:      runID,
+			Decision:   decision,
+			Status:     types.RoutedStatusError,
+			Reason:     fmt.Sprintf("research_v2_workflow_failed: %v", err),
+		}, err
+	}
+
+	finalText := result.FinalAnswerText
+	if len(finalText) > 2000 {
+		finalText = truncateTo(finalText, 2000)
+	}
+	return &types.RoutedExecutionResult{
+		SessionID:       input.SessionID,
+		WorkflowID:      workflowID,
+		RunID:           runID,
+		Decision:        decision,
+		FinalAnswerRef:  result.FinalAnswerRef,
+		FinalAnswerText: finalText,
+		Status:          types.RoutedStatusOK,
+		CostUSD:         decision.CostBudgetUSD,
+		TokensUsed:      result.TotalTokens,
+		Provider:        result.Provider,
+		ModelUsed:       result.ModelUsed,
+		Mode:            result.Mode,
 		Mock:            result.Mock,
 		FallbackUsed:    result.FallbackUsed,
+		LLMCalls:        result.LLMCalls,
 		Metadata: map[string]interface{}{
-			"debate_rounds":         result.Rounds,
-			"debate_final_position": result.FinalPosition,
-			"debate_consensus":      result.ConsensusReached,
-			"debate_transcript_ref": result.TranscriptRef,
-			"debate_verdict_ref":    result.VerdictRef,
-			"debate_judge_parse":    result.JudgeParseSource,
+			"research_v2_source_count":        result.SourceCount,
+			"research_v2_evidence_count":      result.EvidenceCount,
+			"research_v2_contradiction_count":  result.ContradictionCount,
+			"research_v2_report_ref":          result.ReportRef,
+			"research_v2_evidence_ref":        result.EvidenceRef,
+			"research_v2_synthesis_ref":       result.SynthesisRef,
+			"research_v2_final_answer_ref":    result.FinalAnswerRef,
+			"research_v2_workspace_topic":     result.WorkspaceTopic,
 		},
 	}, nil
 }

@@ -196,6 +196,7 @@ func main() {
 	w.RegisterActivityWithOptions(routerActivities.WriteRoutingPolicyTrace, activity.RegisterOptions{Name: "WriteRoutingPolicyTraceActivity"})
 	w.RegisterActivityWithOptions(routerActivities.EvaluateApprovalPolicy, activity.RegisterOptions{Name: "EvaluateApprovalPolicyActivity"})
 	w.RegisterActivityWithOptions(routerActivities.PersistRoutedExecutionResult, activity.RegisterOptions{Name: "PersistRoutedExecutionResultActivity"})
+	w.RegisterActivityWithOptions(routerActivities.UpdateTaskApprovalStatus, activity.RegisterOptions{Name: "UpdateTaskApprovalStatusActivity"})
 	w.RegisterWorkflowWithOptions(workflows.AdvancedRoutingWorkflow, workflow.RegisterOptions{Name: workflows.AdvancedRoutingWorkflowName})
 	if err := activities.EnsureRouterTable(dbClient.Stdlib()); err != nil {
 		log.Printf("[WARN] Failed to ensure routing_audit_logs table: %v", err)
@@ -236,6 +237,24 @@ func main() {
 	w.RegisterActivityWithOptions(debateActivities.CheckConsensus, activity.RegisterOptions{Name: "CheckConsensusActivity"})
 	w.RegisterActivityWithOptions(debateActivities.AuditDebate, activity.RegisterOptions{Name: "AuditDebateActivity"})
 	w.RegisterWorkflowWithOptions(workflows.DebateWorkflow, workflow.RegisterOptions{Name: workflows.DebateWorkflowName})
+
+	// Phase 7F: Research-Synthesis v2 (Slice 28)
+	researchV2Activities := activities.NewResearchV2Activities(cfg.LLMServiceURL)
+	w.RegisterActivityWithOptions(researchV2Activities.PlanResearch, activity.RegisterOptions{Name: "PlanResearchActivity"})
+	w.RegisterActivityWithOptions(researchV2Activities.RetrieveMultiSourceEvidence, activity.RegisterOptions{Name: "RetrieveMultiSourceEvidenceActivity"})
+	w.RegisterActivityWithOptions(researchV2Activities.ScoreSourceCredibility, activity.RegisterOptions{Name: "ScoreSourceCredibilityActivity"})
+	w.RegisterActivityWithOptions(researchV2Activities.DetectContradictions, activity.RegisterOptions{Name: "DetectContradictionsActivity"})
+	w.RegisterActivityWithOptions(researchV2Activities.BuildCitationChain, activity.RegisterOptions{Name: "BuildCitationChainActivity"})
+	w.RegisterActivityWithOptions(researchV2Activities.FilterByCredibility, activity.RegisterOptions{Name: "FilterByCredibilityActivity"})
+	w.RegisterActivityWithOptions(researchV2Activities.GenerateReportV2, activity.RegisterOptions{Name: "GenerateReportV2Activity"})
+	w.RegisterActivityWithOptions(researchV2Activities.ReflectionBeforeSynthesis, activity.RegisterOptions{Name: "ReflectionBeforeSynthesisActivity"})
+	w.RegisterActivityWithOptions(researchV2Activities.DebateBeforeSynthesis, activity.RegisterOptions{Name: "DebateBeforeSynthesisActivity"})
+	w.RegisterActivityWithOptions(researchV2Activities.AuditResearchV2, activity.RegisterOptions{Name: "AuditResearchV2Activity"})
+	w.RegisterWorkflowWithOptions(workflows.ResearchSynthesisV2Workflow, workflow.RegisterOptions{Name: workflows.ResearchSynthesisV2WorkflowName})
+
+	// Phase 7G: Workspace Store Persistence
+	workspaceActivities := activities.NewWorkspaceActivities(dbClient.Stdlib())
+	w.RegisterActivityWithOptions(workspaceActivities.WorkspacePut, activity.RegisterOptions{Name: "WorkspacePutActivity"})
 
 	// Phase 6E: Embeddings + Qdrant + RAG
 	embedCfg := embeddings.Config{

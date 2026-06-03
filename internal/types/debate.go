@@ -62,12 +62,16 @@ type DebateResult struct {
 	Provider     string `json:"provider,omitempty"`
 	ModelUsed    string `json:"model_used,omitempty"`
 	Mode         string `json:"mode,omitempty"`
-	Mock         bool   `json:"mock,omitempty"`
-	FallbackUsed bool   `json:"fallback_used,omitempty"`
-	LLMCalls     int    `json:"llm_calls,omitempty"`
+	// Mock is a real JSON boolean (NOT omitempty) so the API result
+	// body always carries an explicit true/false. Phase 7E.6 polish.
+	Mock         bool `json:"mock"`
+	FallbackUsed bool `json:"fallback_used,omitempty"`
+	// LLMCalls is the number of real LLM round-trips the debate made
+	// (Pro+Con+Judge per round + 1 final Judge). Phase 7E.6 polish.
+	LLMCalls int `json:"llm_calls"`
 	// Judge parse telemetry
-	JudgeParseSource  string `json:"judge_parse_source,omitempty"`  // "json" | "regex" | "heuristic"
-	ConfidenceSource  string `json:"confidence_source,omitempty"`  // "json" | "fallback"
+	JudgeParseSource string `json:"judge_parse_source,omitempty"` // "json" | "regex" | "heuristic"
+	ConfidenceSource string `json:"confidence_source,omitempty"` // "json" | "regex" | "heuristic" | "fallback"
 }
 
 // DebateWorkflowInput is the input to DebateWorkflow.

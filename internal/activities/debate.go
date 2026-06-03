@@ -197,8 +197,8 @@ type JudgeDebateResult struct {
 	Confidence      float64             `json:"confidence"`
 	TokensUsed      int                 `json:"tokens_used"`
 	Mode            string              `json:"mode,omitempty"`
-	ParseSource     string              `json:"parse_source,omitempty"`     // "json" | "regex" | "heuristic"
-	ConfidenceSrc   string              `json:"confidence_source,omitempty"` // "json" | "fallback"
+	ParseSource     string              `json:"parse_source,omitempty"`         // "json" | "regex" | "heuristic"
+	ConfidenceSrc   string              `json:"confidence_source,omitempty"`     // "json" | "regex" | "heuristic" | "fallback"
 }
 
 // JudgeDebate scores the current round and produces a structured verdict.
@@ -219,7 +219,7 @@ func (da *DebateActivities) JudgeDebate(ctx context.Context, input JudgeDebateIn
 			TokensUsed:    30,
 			Mode:          "mock",
 			ParseSource:   "heuristic",
-			ConfidenceSrc: "fallback",
+			ConfidenceSrc: "heuristic",
 		}, nil
 	}
 
@@ -307,48 +307,65 @@ Do NOT default to a hard-coded winner. Base verdict strictly on the relative str
 
 // parseJudgeVerdict extracts a structured JudgeVerdict from raw LLM text.
 // Returns the verdict, parse source ("json" | "regex" | "heuristic"), and
-// confidence source ("json" | "fallback").
+// confidence source ("json" | "regex" | "heuristic" | "fallback").
 //
 // Order:
-//  1. Try strict JSON block (with json.RawMessage tolerant parsing).
-//  2. Try field-by-field regex extraction.
-//  3. Fall back to heuristic: count pro/con keyword occurrences and a soft verdict.
+//  1. Strip <think> / markdown wrappers and try strict JSON block.
+//  2. Try field-by-field regex extraction (still tag confidence as regex
+//     only if we actually extracted a confidence value).
+//  3. Heuristic: keyword counts, never a hard-coded winner.
+//  4. "fallback" is reserved for the no-signal case (empty raw).
 func parseJudgeVerdict(raw string) (*types.JudgeVerdict, string, string) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, "heuristic", "fallback"
 	}
 
-	// 1) Try strict JSON block.
-	if start := strings.Index(raw, "{"); start >= 0 {
-		if end := strings.LastIndex(raw, "}"); end > start {
-			block := raw[start : end+1]
+	// 0) Strip <think> / markdown wrappers (Phase 7E.6 polish).
+	cleaned := stripThinkAndMarkdown(raw)
+
+	// 1) Try strict JSON block on the cleaned text.
+	if start := strings.Index(cleaned, "{"); start >= 0 {
+		if end := strings.LastIndex(cleaned, "}"); end > start {
+			block := cleaned[start : end+1]
 			var v types.JudgeVerdict
 			if err := json.Unmarshal([]byte(block), &v); err == nil && v.Verdict != "" {
 				v.Verdict = normalizeVerdict(v.Verdict)
 				v.ProScore = clampUnit(v.ProScore)
 				v.ConScore = clampUnit(v.ConScore)
-				v.Confidence = clampUnit(v.Confidence)
-				return &v, "json", "json"
+				confSrc := "json"
+				if v.Confidence == 0 {
+					// JSON parsed but no confidence value; assign a
+					// heuristic default and tag the source accordingly.
+					v.Confidence = 0.6
+					confSrc = "heuristic"
+				} else {
+					v.Confidence = clampUnit(v.Confidence)
+				}
+				return &v, "json", confSrc
 			}
 		}
 	}
 
 	// 2) Regex-style field extraction.
 	v := &types.JudgeVerdict{Verdict: "tie"}
-	if s, ok := extractFloatAfter(raw, "verdict_score_pro:"); ok {
+	confSrc := "fallback"
+	hadConf := false
+	if s, ok := extractFloatAfter(cleaned, "verdict_score_pro:"); ok {
 		v.ProScore = clampUnit(s)
-	} else if s, ok := extractFloatAfter(raw, "pro_score:"); ok {
+	} else if s, ok := extractFloatAfter(cleaned, "pro_score:"); ok {
 		v.ProScore = clampUnit(s)
 	}
-	if s, ok := extractFloatAfter(raw, "con_score:"); ok {
+	if s, ok := extractFloatAfter(cleaned, "con_score:"); ok {
 		v.ConScore = clampUnit(s)
 	}
-	if s, ok := extractFloatAfter(raw, "confidence:"); ok {
+	if s, ok := extractFloatAfter(cleaned, "confidence:"); ok {
 		v.Confidence = clampUnit(s)
+		hadConf = true
+		confSrc = "regex"
 	}
 	verdict := ""
-	low := strings.ToLower(raw)
+	low := strings.ToLower(cleaned)
 	switch {
 	case strings.Contains(low, "\"verdict\": \"pro\"") || strings.Contains(low, "verdict: pro"):
 		verdict = "pro"
@@ -361,7 +378,11 @@ func parseJudgeVerdict(raw string) (*types.JudgeVerdict, string, string) {
 		v.Verdict = verdict
 	}
 	if v.Verdict != "" && (v.ProScore > 0 || v.ConScore > 0) {
-		return v, "regex", "regex"
+		if !hadConf {
+			v.Confidence = 0.5
+			confSrc = "heuristic"
+		}
+		return v, "regex", confSrc
 	}
 
 	// 3) Heuristic fallback — keyword counts, never a hard-coded winner.
@@ -379,7 +400,43 @@ func parseJudgeVerdict(raw string) (*types.JudgeVerdict, string, string) {
 	}
 	v.Confidence = 0.4
 	v.Rationale = truncate(raw, 200)
-	return v, "heuristic", "fallback"
+	return v, "heuristic", "heuristic"
+}
+
+// stripThinkAndMarkdown strips model-specific wrappers that can prevent
+// strict JSON parsing (Phase 7E.6 polish). It removes:
+//   - <think>...</think>  blocks (DeepSeek / MiniMax style)
+//   - ```json / ``` fences
+//   - leading "json" or "JSON" header words
+// then returns the trimmed text.
+func stripThinkAndMarkdown(raw string) string {
+	s := raw
+	// 1) Strip <think>...</think> blocks (any case, non-greedy).
+	for {
+		start := strings.Index(strings.ToLower(s), "<think>")
+		if start < 0 {
+			break
+		}
+		end := strings.Index(strings.ToLower(s[start:]), "</think>")
+		if end < 0 {
+			s = s[:start]
+			break
+		}
+		s = s[:start] + s[start+end+len("</think>"):]
+	}
+	// 2) Strip markdown ```json / ``` fences.
+	s = strings.ReplaceAll(s, "```json", "")
+	s = strings.ReplaceAll(s, "```JSON", "")
+	s = strings.ReplaceAll(s, "```", "")
+	// 3) Strip leading "json" / "JSON" header words.
+	trimmed := strings.TrimSpace(s)
+	low := strings.ToLower(trimmed)
+	if strings.HasPrefix(low, "json\n") || strings.HasPrefix(low, "json ") {
+		trimmed = strings.TrimSpace(trimmed[4:])
+	} else if low == "json" {
+		trimmed = ""
+	}
+	return strings.TrimSpace(trimmed)
 }
 
 func normalizeVerdict(v string) string {

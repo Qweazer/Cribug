@@ -46,7 +46,10 @@ type ToTResult struct {
 	ModelUsed    string `json:"model_used,omitempty"`
 	Mode         string `json:"mode,omitempty"` // "real" | "mock"
 	Mock         bool   `json:"mock,omitempty"`
-	FallbackUsed bool   `json:"fallback_used,omitempty"`
+	FallbackUsed bool `json:"fallback_used,omitempty"`
+	// LLMCalls is the number of real LLM round-trips made by
+	// the ToT workflow (Generate + Score + Synthesize). Phase 7J.
+	LLMCalls int `json:"llm_calls"`
 }
 
 // ToTWorkflowInput is the input to TreeOfThoughtsWorkflow.

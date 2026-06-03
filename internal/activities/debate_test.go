@@ -203,8 +203,8 @@ func TestParseJudgeVerdictHeuristicFallback(t *testing.T) {
 	if src != "heuristic" {
 		t.Errorf("parse_source = %q, want heuristic", src)
 	}
-	if confSrc != "fallback" {
-		t.Errorf("confidence_source = %q, want fallback", confSrc)
+	if confSrc != "heuristic" {
+		t.Errorf("confidence_source = %q, want heuristic", confSrc)
 	}
 }
 
@@ -215,6 +215,95 @@ func TestParseJudgeVerdictEmptyRaw(t *testing.T) {
 	}
 	if src != "heuristic" {
 		t.Errorf("parse_source = %q, want heuristic", src)
+	}
+}
+
+func TestParseJudgeVerdictStripsThinkAndMarkdown(t *testing.T) {
+	// MiniMax / DeepSeek style: <think>...</think> + markdown fence
+	// around the JSON. Stripping should yield a parseable JSON.
+	raw := "<think>The user wants me to judge this debate. Let me consider both sides carefully.</think>\n```json\n{\n  \"verdict\": \"pro\",\n  \"pro_score\": 0.7,\n  \"con_score\": 0.4,\n  \"confidence\": 0.85,\n  \"rationale\": \"Pro stronger\"\n}\n```"
+	v, src, confSrc := parseJudgeVerdict(raw)
+	if v == nil {
+		t.Fatalf("expected non-nil verdict, got nil")
+	}
+	if v.Verdict != "pro" {
+		t.Errorf("verdict = %q, want pro", v.Verdict)
+	}
+	if src != "json" {
+		t.Errorf("parse_source = %q, want json", src)
+	}
+	if confSrc != "json" {
+		t.Errorf("confidence_source = %q, want json", confSrc)
+	}
+}
+
+func TestParseJudgeVerdictJSONWithoutConfidence(t *testing.T) {
+	// JSON parses but confidence is absent -> confidence_source=heuristic
+	// (still extract verdict + scores from JSON).
+	raw := `{"verdict": "con", "pro_score": 0.3, "con_score": 0.7, "rationale": "x"}`
+	v, src, confSrc := parseJudgeVerdict(raw)
+	if v == nil {
+		t.Fatal("expected non-nil verdict")
+	}
+	if v.Verdict != "con" {
+		t.Errorf("verdict = %q, want con", v.Verdict)
+	}
+	if src != "json" {
+		t.Errorf("parse_source = %q, want json", src)
+	}
+	if confSrc != "heuristic" {
+		t.Errorf("confidence_source = %q, want heuristic", confSrc)
+	}
+	if v.Confidence <= 0 {
+		t.Errorf("confidence = %f, want > 0 (heuristic default)", v.Confidence)
+	}
+}
+
+func TestParseJudgeVerdictRegexWithConfidence(t *testing.T) {
+	// Regex path with confidence value -> confSrc=regex.
+	raw := "verdict: pro\npro_score: 0.7\ncon_score: 0.3\nconfidence: 0.9"
+	v, src, confSrc := parseJudgeVerdict(raw)
+	if v == nil {
+		t.Fatal("expected non-nil")
+	}
+	if src != "regex" {
+		t.Errorf("parse_source = %q, want regex", src)
+	}
+	if confSrc != "regex" {
+		t.Errorf("confidence_source = %q, want regex", confSrc)
+	}
+}
+
+func TestParseJudgeVerdictRegexNoConfidence(t *testing.T) {
+	// Regex path with no confidence value -> confSrc=heuristic.
+	raw := "verdict: pro\npro_score: 0.7\ncon_score: 0.3"
+	v, src, confSrc := parseJudgeVerdict(raw)
+	if v == nil {
+		t.Fatal("expected non-nil")
+	}
+	if src != "regex" {
+		t.Errorf("parse_source = %q, want regex", src)
+	}
+	if confSrc != "heuristic" {
+		t.Errorf("confidence_source = %q, want heuristic", confSrc)
+	}
+}
+
+func TestStripThinkAndMarkdown(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"<think>foo</think>{}", "{}"},
+		{"```json\n{}\n```", "{}"},
+		{"```JSON\n{}\n```", "{}"},
+		{"```{}{}{}```", "{}{}{}"}, // ```json strip first, then ``` strips
+		{"json\n{}", "{}"},
+		{"plain", "plain"},
+		{"<think>a<think>b</think>c</think>{}", "c</think>{}"}, // nested think: outer strips first pass, leaves "c</think>{}"
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := stripThinkAndMarkdown(tc.in); got != tc.want {
+			t.Errorf("stripThinkAndMarkdown(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }
 

@@ -59,6 +59,7 @@ func TestEvaluateApprovalPolicyCritical(t *testing.T) {
 		RiskLevel:       "critical",
 		Mode:            string(types.RouteSandboxExecution),
 		RequiresSandbox: true,
+		RequireApproval: true,
 	})
 	if err != nil {
 		t.Fatalf("EvaluateApprovalPolicy failed: %v", err)
@@ -75,6 +76,7 @@ func TestEvaluateApprovalPolicyLowRisk(t *testing.T) {
 		RiskLevel:       "low",
 		Mode:            string(types.RouteDirectAnswer),
 		RequiresSandbox: false,
+		RequireApproval: true,
 	})
 	if err != nil {
 		t.Fatalf("EvaluateApprovalPolicy failed: %v", err)
@@ -91,12 +93,33 @@ func TestEvaluateApprovalPolicySandbox(t *testing.T) {
 		RiskLevel:       "medium",
 		Mode:            string(types.RouteSandboxExecution),
 		RequiresSandbox: true,
+		RequireApproval: true,
 	})
 	if err != nil {
 		t.Fatalf("EvaluateApprovalPolicy failed: %v", err)
 	}
 	if !result.Required {
 		t.Error("sandbox execution should require approval")
+	}
+}
+
+// TestEvaluateApprovalPolicyOverride verifies the test-only
+// ROUTER_REQUIRE_APPROVAL=false kill switch. Even with critical
+// risk, the gate must be disabled.
+func TestEvaluateApprovalPolicyOverride(t *testing.T) {
+	aa := NewRouterActivities(nil)
+	result, err := aa.EvaluateApprovalPolicy(context.Background(), EvaluateApprovalPolicyInput{
+		ComplexityScore: 0.95,
+		RiskLevel:       "critical",
+		Mode:            string(types.RouteSandboxExecution),
+		RequiresSandbox: true,
+		RequireApproval: false, // test/smoke override
+	})
+	if err != nil {
+		t.Fatalf("EvaluateApprovalPolicy failed: %v", err)
+	}
+	if result.Required {
+		t.Error("RequireApproval=false must override critical risk")
 	}
 }
 

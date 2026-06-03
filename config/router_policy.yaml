@@ -1,0 +1,134 @@
+# Cribug Router Policy — Phase 7I Multi-Signal Strategy
+# Replaces scattered keyword/threshold logic with a structured signal model.
+# Used by EvaluateRoutingPolicyActivity to score and select the best mode
+# for each routed request. Heuristic fast path is default; LLM classifier
+# is optional and gated behind REAL_ROUTER_CLASSIFIER_TEST=1.
+
+version: "1.0"
+
+# --- Mode thresholds (complexity) ---
+thresholds:
+  direct_answer_max: 0.15
+  rag_min: 0.10
+  react_min: 0.20
+  dag_min: 0.35
+  reflection_min: 0.30
+  tree_of_thoughts_min: 0.55
+  debate_min: 0.35
+  research_v2_min: 0.50
+  swarm_min: 0.65
+  sandbox_require_approval: true
+
+# --- Risk classification ---
+risk:
+  low_max_complexity: 0.30
+  medium_max_complexity: 0.60
+  high_max_complexity: 0.85
+  critical_min_complexity: 0.85
+  require_approval_min_risk: "high"
+
+# --- Budget ---
+budget:
+  cheap_max_usd: 0.05
+  medium_max_usd: 0.25
+  expensive_min_usd: 0.50
+  token_per_complexity_multiplier: 8000
+
+# --- Keyword weights for mode signals ---
+keywords:
+  debate:
+    - "比较"
+    - "对比"
+    - "vs "
+    - "versus"
+    - "debate"
+    - "pros and cons"
+    - "trade-off"
+    - "which is better"
+    - "compare"
+  tot:
+    - "explore multiple"
+    - "multi-path"
+    - "branch"
+    - "best path"
+    - "search tree"
+    - "find best approach"
+    - "multiple perspectives"
+  research:
+    - "研究"
+    - "分析"
+    - "报告"
+    - "evidence"
+    - "citation"
+    - "sources"
+    - "literature"
+    - "review"
+  tool:
+    - "搜索"
+    - "计算"
+    - "运行"
+    - "执行"
+    - "bash"
+    - "python"
+    - "compile"
+  sandbox:
+    - "沙箱"
+    - "sandbox"
+    - "untrusted code"
+    - "execute code"
+    - "run code"
+  dag:
+    - "步骤"
+    - "step"
+    - "sequence"
+    - "workflow"
+    - "pipeline"
+  swarm:
+    - "多 agent"
+    - "团队"
+    - "分工"
+    - "multi-agent"
+    - "collaborate"
+    - "swarm"
+
+# --- Capability signals ---
+capabilities:
+  require_tools_signal: "tool"
+  require_rag_signal: "rag"
+  require_sandbox_signal: "sandbox"
+  require_citations_boost_research: 0.20
+  allow_research_default: true
+  allow_tools_default: true
+  allow_sandbox_default: false
+
+# --- Mode priority ordering (highest first) ---
+mode_priority:
+  - sandbox_execution
+  - research_v2
+  - tree_of_thoughts
+  - debate
+  - swarm_workflow
+  - dag_workflow
+  - reflection
+  - react_tool
+  - rag_answer
+  - direct_answer
+
+# --- Fallback policy ---
+fallback:
+  default_mode: direct_answer
+  mode_disabled_fallback: direct_answer
+  max_addon_capabilities: 3
+
+# --- LLM classifier (optional, default off) ---
+classifier:
+  enabled: false
+  model_tier: small
+  max_tokens: 400
+  real_test_only: true
+
+# --- Telemetry ---
+telemetry:
+  log_routing_decisions: true
+  record_signal_scores: true
+  audit_policy_version: true

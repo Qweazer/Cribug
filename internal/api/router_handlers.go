@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"cribug/internal/db"
 	"cribug/internal/types"
 
 	"github.com/go-chi/chi/v5"
@@ -348,6 +349,26 @@ func (h *RouteHandler) GetTaskResult(w http.ResponseWriter, r *http.Request) {
 		resp.Status = "running"
 		WriteJSON(w, http.StatusAccepted, resp)
 		return
+	case "waiting_for_approval":
+		resp.Status = "waiting_for_approval"
+		// Surface approval details from metadata or from a separate
+		// query. The metadata blob written by
+		// UpdateTaskApprovalStatusActivity carries the approval_id,
+		// approval_url, risk_level, mode, reason.
+		if task.Metadata != "" {
+			var md map[string]interface{}
+			if json.Unmarshal([]byte(task.Metadata), &md) == nil {
+				if aid, ok := md["approval_id"].(string); ok {
+					resp.Result = &types.RoutedExecutionResult{
+						Status:            "waiting_for_approval",
+						PendingApprovalID: aid,
+						Metadata:          md,
+					}
+				}
+			}
+		}
+		WriteJSON(w, http.StatusAccepted, resp)
+		return
 	case "failed":
 		resp.Status = "failed"
 		if task.Error.Valid {
@@ -605,6 +626,12 @@ func RouterConfigFromEnv() types.RouterConfigSnapshot {
 		EnableToT:                getEnvBoolDefault("ENABLE_TOT", false),
 		EnableDebate:             getEnvBoolDefault("ENABLE_DEBATE", false),
 		EnableResearchV2:         getEnvBoolDefault("ENABLE_RESEARCH_V2", false),
+		// Production default: approval gate enabled. Smoke/test
+		// environments can set ROUTER_REQUIRE_APPROVAL=false to
+		// disable the gate so async workflows complete without a
+		// human signal. This is a test-only override; do NOT set
+		// this in production.
+		RequireApproval: getEnvBoolDefault("ROUTER_REQUIRE_APPROVAL", true),
 	}
 }
 
@@ -624,4 +651,207 @@ func getEnvBoolDefault(key string, defaultVal bool) bool {
 		return v == "1" || v == "true" || v == "yes"
 	}
 	return defaultVal
+}
+
+// ─── POST /api/v1/tasks/{id}/approve (Phase 7F Approval UX) ────────────
+
+// ApproveTask is a convenience endpoint that approves a task waiting
+// in the approval gate. It looks up the workflow_id from the tasks
+// row, finds the pending approval in the approvals table, validates
+// state, and sends the Temporal signal to the waiting workflow.
+func (h *RouteHandler) ApproveTask(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "id")
+	if taskID == "" {
+		WriteError(w, http.StatusBadRequest, "task id is required", types.ErrorTypeValidation)
+		return
+	}
+	ctx := r.Context()
+
+	task, err := h.getTaskByAnyID(ctx, taskID)
+	if err != nil || task == nil {
+		WriteError(w, http.StatusNotFound, "task not found", types.ErrorTypeValidation)
+		return
+	}
+
+	// Find the pending approval for this workflow.
+	var approvalID, currentStatus, apprRunID string
+	err = h.db.QueryRowContext(ctx, `
+		SELECT approval_id, status, COALESCE(run_id,'') FROM approvals
+		WHERE workflow_id = $1 AND status = 'pending'
+		ORDER BY requested_at DESC LIMIT 1`,
+		task.WorkflowID,
+	).Scan(&approvalID, &currentStatus, &apprRunID)
+	if err == sql.ErrNoRows {
+		WriteError(w, http.StatusNotFound, "no pending approval found for this task", types.ErrorTypeValidation)
+		return
+	}
+	if err != nil {
+		log.Printf("[ERROR] query approval for task: %v", err)
+		WriteError(w, http.StatusInternalServerError, "failed to query approval", types.ErrorTypeDB)
+		return
+	}
+
+	// Send the approval signal via Temporal.
+	runID := apprRunID
+	if task.RunID.Valid && task.RunID.String != "" {
+		runID = task.RunID.String
+	}
+	signalName := types.ApprovalSignalName(approvalID)
+	signalPayload := types.ApprovalSignalPayload{
+		ApprovalID: approvalID,
+		WorkflowID: task.WorkflowID,
+		RunID:      runID,
+		Approved:   true,
+		ApprovedBy: "api-task-approve",
+	}
+
+	if hErr := h.sendApprovalSignal(ctx, task.WorkflowID, runID, signalName, signalPayload); hErr != nil {
+		WriteError(w, http.StatusInternalServerError, hErr.Error(), types.ErrorTypeWorkflow)
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"status":      "approved",
+		"task_id":     taskID,
+		"approval_id": approvalID,
+		"workflow_id": task.WorkflowID,
+	})
+}
+
+// ─── POST /api/v1/tasks/{id}/reject (Phase 7F Approval UX) ─────────────
+
+// RejectTask rejects a task waiting in the approval gate. Same lookup
+// as ApproveTask but signals approved=false.
+func (h *RouteHandler) RejectTask(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "id")
+	if taskID == "" {
+		WriteError(w, http.StatusBadRequest, "task id is required", types.ErrorTypeValidation)
+		return
+	}
+	ctx := r.Context()
+
+	task, err := h.getTaskByAnyID(ctx, taskID)
+	if err != nil || task == nil {
+		WriteError(w, http.StatusNotFound, "task not found", types.ErrorTypeValidation)
+		return
+	}
+
+	var approvalID, apprRunID string
+	err = h.db.QueryRowContext(ctx, `
+		SELECT approval_id, COALESCE(run_id,'') FROM approvals
+		WHERE workflow_id = $1 AND status = 'pending'
+		ORDER BY requested_at DESC LIMIT 1`,
+		task.WorkflowID,
+	).Scan(&approvalID, &apprRunID)
+	if err == sql.ErrNoRows {
+		WriteError(w, http.StatusNotFound, "no pending approval found for this task", types.ErrorTypeValidation)
+		return
+	}
+	if err != nil {
+		log.Printf("[ERROR] query approval for task: %v", err)
+		WriteError(w, http.StatusInternalServerError, "failed to query approval", types.ErrorTypeDB)
+		return
+	}
+
+	runID := apprRunID
+	if task.RunID.Valid && task.RunID.String != "" {
+		runID = task.RunID.String
+	}
+	signalName := types.ApprovalSignalName(approvalID)
+	signalPayload := types.ApprovalSignalPayload{
+		ApprovalID: approvalID,
+		WorkflowID: task.WorkflowID,
+		RunID:      runID,
+		Approved:   false,
+		ApprovedBy: "api-task-reject",
+	}
+
+	if hErr := h.sendApprovalSignal(ctx, task.WorkflowID, runID, signalName, signalPayload); hErr != nil {
+		WriteError(w, http.StatusInternalServerError, hErr.Error(), types.ErrorTypeWorkflow)
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"status":      "rejected",
+		"task_id":     taskID,
+		"approval_id": approvalID,
+		"workflow_id": task.WorkflowID,
+	})
+}
+
+// sendApprovalSignal dispatches a Temporal signal to the given workflow.
+func (h *RouteHandler) sendApprovalSignal(ctx context.Context, workflowID, runID, signalName string, payload types.ApprovalSignalPayload) error {
+	if h.temporal == nil {
+		return fmt.Errorf("temporal client not available")
+	}
+	return h.temporal.SignalWorkflow(ctx, workflowID, runID, signalName, payload)
+}
+
+// ─── GET /api/v1/workspace?ref=... (Phase 7G Workspace Store) ──────────
+
+// GetWorkspaceByRef returns a workspace entry by its ref query parameter.
+func (h *RouteHandler) GetWorkspaceByRef(w http.ResponseWriter, r *http.Request) {
+	ref := r.URL.Query().Get("ref")
+	if ref == "" {
+		WriteError(w, http.StatusBadRequest, "ref query param is required", types.ErrorTypeValidation)
+		return
+	}
+	we, err := db.GetWorkspaceEntryByRef(r.Context(), h.db, ref)
+	if err != nil {
+		log.Printf("[ERROR] get workspace by ref: %v", err)
+		WriteError(w, http.StatusInternalServerError, "failed to read workspace", types.ErrorTypeDB)
+		return
+	}
+	if we == nil {
+		WriteError(w, http.StatusNotFound, "workspace entry not found for ref="+ref, types.ErrorTypeValidation)
+		return
+	}
+	WriteJSON(w, http.StatusOK, we.ToDomain())
+}
+
+// ─── GET /api/v1/workspace/{id} (Phase 7G) ─────────────────────────────
+
+// GetWorkspaceByID returns a workspace entry by its DB id.
+func (h *RouteHandler) GetWorkspaceByID(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		WriteError(w, http.StatusBadRequest, "id is required", types.ErrorTypeValidation)
+		return
+	}
+	we, err := db.GetWorkspaceEntryByRef(r.Context(), h.db, id)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "failed to read workspace", types.ErrorTypeDB)
+		return
+	}
+	if we == nil {
+		WriteError(w, http.StatusNotFound, "workspace entry not found", types.ErrorTypeValidation)
+		return
+	}
+	WriteJSON(w, http.StatusOK, we.ToDomain())
+}
+
+// ─── GET /api/v1/tasks/{id}/workspace (Phase 7G) ───────────────────────
+
+// ListTaskWorkspace returns all workspace entries for a task (identified
+// by task id or workflow_id).
+func (h *RouteHandler) ListTaskWorkspace(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		WriteError(w, http.StatusBadRequest, "task id is required", types.ErrorTypeValidation)
+		return
+	}
+	entries, err := db.ListWorkspaceEntriesByWorkflow(r.Context(), h.db, id)
+	if err != nil {
+		log.Printf("[ERROR] list workspace: %v", err)
+		WriteError(w, http.StatusInternalServerError, "failed to list workspace", types.ErrorTypeDB)
+		return
+	}
+	domains := make([]db.WorkspaceEntryDomain, 0, len(entries))
+	for _, e := range entries {
+		domains = append(domains, e.ToDomain())
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"entries": domains,
+		"count":   len(domains),
+	})
 }
