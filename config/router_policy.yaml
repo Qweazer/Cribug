@@ -1,134 +1,282 @@
-# Cribug Router Policy — Phase 7I Multi-Signal Strategy
-# Replaces scattered keyword/threshold logic with a structured signal model.
-# Used by EvaluateRoutingPolicyActivity to score and select the best mode
-# for each routed request. Heuristic fast path is default; LLM classifier
-# is optional and gated behind REAL_ROUTER_CLASSIFIER_TEST=1.
-
+# Cribug Router Policy v2 — Phase 7I Multi-Signal Policy
+# Used by EvaluateRoutingPolicyActivity to score every mode against
+# the same set of signals. Heuristic fast path is the default; LLM
+# classifier is gated behind ROUTER_CLASSIFIER_ENABLED (default off)
+# and is INDEPENDENT from the Approval Gate kill switch.
 version: "1.0"
 
-# --- Mode thresholds (complexity) ---
+# ── Mode complexity thresholds ──
 thresholds:
-  direct_answer_max: 0.15
-  rag_min: 0.10
-  react_min: 0.20
-  dag_min: 0.35
-  reflection_min: 0.30
+  direct_answer_max:   0.15
+  rag_min:             0.10
+  react_min:           0.20
+  dag_min:             0.35
+  reflection_min:      0.30
   tree_of_thoughts_min: 0.55
-  debate_min: 0.35
-  research_v2_min: 0.50
-  swarm_min: 0.65
-  sandbox_require_approval: true
+  debate_min:          0.35
+  debate_max:          0.60
+  research_v2_min:     0.50
+  swarm_min:           0.65
+  sandbox_min_risk:    "high"
 
-# --- Risk classification ---
+# ── Risk classification ──
 risk:
-  low_max_complexity: 0.30
-  medium_max_complexity: 0.60
-  high_max_complexity: 0.85
-  critical_min_complexity: 0.85
-  require_approval_min_risk: "high"
+  low_max:       0.30
+  medium_max:    0.60
+  high_max:      0.85
+  critical_min:  0.85
+  require_approval_min: "high"
 
-# --- Budget ---
+# ── Budget (per mode estimated USD) ──
 budget:
-  cheap_max_usd: 0.05
-  medium_max_usd: 0.25
+  cheap_max_usd:    0.05
+  medium_max_usd:   0.25
   expensive_min_usd: 0.50
-  token_per_complexity_multiplier: 8000
+  estimated_cost_usd:
+    direct_answer:    0.005
+    rag_answer:       0.02
+    react_tool:       0.03
+    dag_workflow:     0.08
+    reflection:       0.06
+    tree_of_thoughts: 0.18
+    debate:           0.12
+    research_v2:      0.20
+    swarm_workflow:   0.30
+    sandbox_execution: 0.05
 
-# --- Keyword weights for mode signals ---
+# ── Latency (per mode estimated ms) ──
+latency:
+  fast_max_ms:   5000
+  medium_max_ms: 30000
+  slow_min_ms:   60000
+  estimated_latency_ms:
+    direct_answer:    2000
+    rag_answer:       5000
+    react_tool:       8000
+    dag_workflow:     20000
+    reflection:       30000
+    tree_of_thoughts: 90000
+    debate:           60000
+    research_v2:      120000
+    swarm_workflow:   180000
+    sandbox_execution: 30000
+
+# ── Keyword weights (per mode) ──
 keywords:
   debate:
-    - "比较"
-    - "对比"
-    - "vs "
-    - "versus"
-    - "debate"
-    - "pros and cons"
-    - "trade-off"
-    - "which is better"
-    - "compare"
-  tot:
-    - "explore multiple"
-    - "multi-path"
-    - "branch"
-    - "best path"
-    - "search tree"
-    - "find best approach"
-    - "multiple perspectives"
-  research:
-    - "研究"
-    - "分析"
-    - "报告"
-    - "evidence"
-    - "citation"
-    - "sources"
-    - "literature"
-    - "review"
-  tool:
-    - "搜索"
-    - "计算"
-    - "运行"
-    - "执行"
-    - "bash"
-    - "python"
-    - "compile"
-  sandbox:
-    - "沙箱"
-    - "sandbox"
-    - "untrusted code"
-    - "execute code"
-    - "run code"
-  dag:
-    - "步骤"
-    - "step"
-    - "sequence"
-    - "workflow"
-    - "pipeline"
-  swarm:
-    - "多 agent"
-    - "团队"
-    - "分工"
-    - "multi-agent"
-    - "collaborate"
-    - "swarm"
+    weight_per_match: 0.20
+    keywords: ["比较", "对比", "vs ", "versus", "debate", "pros and cons",
+               "trade-off", "which is better", "compare", "view", "opinion",
+               "argument", "for and against"]
+  tree_of_thoughts:
+    weight_per_match: 0.25
+    keywords: ["explore multiple", "multi-path", "branch", "best path",
+               "search tree", "explore paths", "find best approach",
+               "analyze paths", "multiple perspectives", "branching",
+               "tree of thought", "explore both", "explore alternatives"]
+  research_v2:
+    weight_per_match: 0.25
+    keywords: ["研究", "分析", "报告", "evidence", "citation", "sources",
+               "literature", "review", "investigate", "study", "comprehensive",
+               "with citations", "according to"]
+  sandbox_execution:
+    weight_per_match: 0.30
+    keywords: ["执行", "运行", "沙箱", "代码", "编译", "测试", "execute", "run ",
+               "sandbox", "python code", "script", "compile", "wasi",
+               "untrusted code", "execute code"]
+  swarm_workflow:
+    weight_per_match: 0.30
+    keywords: ["多agent", "多角色", "团队", "分工", "协作", "swarm",
+               "multi-agent", "team of agents", "collaborat", "multiple agents"]
+  reflection:
+    weight_per_match: 0.15
+    keywords: ["分析", "评估", "改进", "analyze", "evaluate", "improve",
+               "refine", "critique", "polish"]
+  dag_workflow:
+    weight_per_match: 0.15
+    keywords: ["步骤", "step", "sequence", "workflow", "pipeline", "first then"]
+  skills:
+    weight_per_match: 0.10
+    keywords: ["summarize", "calculate", "translate", "skill", "safe_math"]
+  mcp_tools:
+    weight_per_match: 0.20
+    keywords: ["mcp", "tool call", "external tool", "bash", "python",
+               "compile", "search"]
 
-# --- Capability signals ---
-capabilities:
-  require_tools_signal: "tool"
-  require_rag_signal: "rag"
-  require_sandbox_signal: "sandbox"
-  require_citations_boost_research: 0.20
-  allow_research_default: true
-  allow_tools_default: true
-  allow_sandbox_default: false
+# ── Per-mode signal weights ──
+signal_weights:
+  direct_answer:    { base: 0.50 }
+  react_tool:       { base: 0.10, tool_need: 0.30, complexity_overall: 0.30 }
+  rag_answer:       { base: 0.10, rag_need: 0.40, complexity_overall: 0.20 }
+  dag_workflow:     { base: 0.05, tool_need: 0.20, complexity_overall: 0.30 }
+  reflection:       { base: 0.10, analyze: 0.30, complexity_overall: 0.30 }
+  tree_of_thoughts: { base: 0.05, exploration: 0.35, complexity_overall: 0.40 }
+  debate:           { base: 0.10, debate: 0.40, complexity_overall: 0.20 }
+  research_v2:      { base: 0.10, research: 0.35, needs_citation: 0.25, complexity_overall: 0.20 }
+  swarm_workflow:   { base: 0.05, multi_agent: 0.40, complexity_overall: 0.30 }
+  sandbox_execution: { base: 0.05, execution: 0.50, sandbox_need: 0.40, risk_penalty: 0.30 }
 
-# --- Mode priority ordering (highest first) ---
-mode_priority:
-  - sandbox_execution
-  - research_v2
-  - tree_of_thoughts
-  - debate
-  - swarm_workflow
-  - dag_workflow
-  - reflection
-  - react_tool
-  - rag_answer
-  - direct_answer
+# ── Capability requirements (mode requires this capability flag) ──
+capability_requirements:
+  react_tool:        requires_tools
+  rag_answer:        requires_rag
+  dag_workflow:      requires_tools
+  sandbox_execution: requires_sandbox
+  research_v2:       requires_research
 
-# --- Fallback policy ---
-fallback:
-  default_mode: direct_answer
-  mode_disabled_fallback: direct_answer
-  max_addon_capabilities: 3
+# ── Default addons (per mode) ──
+default_addons:
+  direct_answer:    [workspace, audit]
+  rag_answer:       [rag, citations, workspace, audit]
+  react_tool:       [mcp_tools, workspace, audit]
+  dag_workflow:     [mcp_tools, workspace, audit]
+  reflection:       [workspace, audit]
+  tree_of_thoughts: [workspace, audit]
+  debate:           [workspace, audit]
+  research_v2:      [rag, citations, workspace, audit]
+  swarm_workflow:   [workspace, audit]
+  sandbox_execution: [sandbox, approval, workspace, audit]
 
-# --- LLM classifier (optional, default off) ---
+# ── Forced addons (signal-triggered) ──
+forced_addons:
+  - { when: "require_citations", add: [citations] }
+  - { when: "sandbox_need_score > 0.5", add: [sandbox, approval] }
+  - { when: "rag_need_score > 0.5", add: [rag] }
+  - { when: "evidence_need_score > 0.5", add: [citations] }
+  - { when: "approval_need_score > 0.5", add: [approval] }
+
+# ── Forbidden combinations ──
+forbidden_combinations:
+  - { modes: [sandbox_execution], when: "allow_sandbox=false",
+      reason: "user_disabled_sandbox" }
+  - { modes: [sandbox_execution], when: "sandbox + reflection",
+      reason: "sandbox_forbidden_combo" }
+  - { modes: [sandbox_execution], when: "sandbox + tot",
+      reason: "sandbox_forbidden_combo" }
+  - { modes: [sandbox_execution], when: "sandbox + debate",
+      reason: "sandbox_forbidden_combo" }
+  - { modes: [sandbox_execution], when: "sandbox + research_v2",
+      reason: "sandbox_forbidden_combo" }
+  - { modes: [sandbox_execution], when: "sandbox + swarm",
+      reason: "sandbox_forbidden_combo" }
+  - { modes: [sandbox_execution], when: "sandbox + rag",
+      reason: "sandbox_forbidden_combo" }
+  - { modes: [research_v2], when: "allow_research=false",
+      reason: "user_disabled_research" }
+  - { modes: [react_tool, dag_workflow], when: "allow_tools=false",
+      reason: "user_disabled_tools" }
+
+# ── Fallback order (per mode, when disabled) ──
+fallback_order:
+  sandbox_execution:  []
+  research_v2:       [dag_workflow, reflection]
+  tree_of_thoughts:  [debate, reflection]
+  debate:            [reflection, tree_of_thoughts]
+  swarm_workflow:    [dag_workflow, reflection]
+  dag_workflow:      [react_tool, reflection]
+  reflection:        [tree_of_thoughts, react_tool, direct_answer]
+  react_tool:        [direct_answer]
+  rag_answer:        [direct_answer]
+  direct_answer:     []
+
+# ── Disabled mode behavior (when feature flag off OR user blocks) ──
+disabled_behavior:
+  sandbox_execution:
+    when_disabled:    mode_disabled
+    when_user_blocks: mode_disabled
+  research_v2:
+    when_disabled:    research_v1
+    when_user_blocks: direct_answer
+  tree_of_thoughts:
+    when_disabled:    reflection
+    when_user_blocks: direct_answer
+  debate:
+    when_disabled:    reflection
+    when_user_blocks: direct_answer
+  swarm_workflow:
+    when_disabled:    dag_workflow
+    when_user_blocks: direct_answer
+  reflection:
+    when_disabled:    tree_of_thoughts
+    when_user_blocks: direct_answer
+  dag_workflow:
+    when_disabled:    react_tool
+    when_user_blocks: direct_answer
+  react_tool:
+    when_disabled:    direct_answer
+    when_user_blocks: direct_answer
+  rag_answer:
+    when_disabled:    direct_answer
+    when_user_blocks: direct_answer
+  direct_answer:
+    when_disabled:    direct_answer
+    when_user_blocks: direct_answer
+
+# ── Mode feature flags (default on) ──
+mode_feature_flags:
+  reflection:       true
+  tree_of_thoughts: true
+  debate:           true
+  research_v2:      true
+  sandbox_execution: true
+
+# ── Approval hints ──
+approval_hints:
+  auto_approval_modes: [sandbox_execution]
+  skip_approval_when:
+    - { mode: direct_answer, max_complexity: 0.30 }
+    - { mode: rag_answer,    max_complexity: 0.30 }
+
+# ── LLM classifier (DEFAULT OFF, INDEPENDENT from Approval Gate) ──
 classifier:
-  enabled: false
-  model_tier: small
-  max_tokens: 400
-  real_test_only: true
+  enabled:        false
+  enabled_field:  enable_router_classifier
+  real_test_only:  true
+  model_tier:     small
+  max_tokens:     400
+  skip_when:
+    - "heuristic_score_gap > 0.30"
+    - "budget_usd < 0.01"
+  invoke_only_when:
+    - "complexity_in: [0.20, 0.60]"
+    - "no_clear_winner: true"
+  prompt_template: |
+    Score each mode 0-1 for the query: {query}
+    Modes: {mode_list}
+    Output STRICT JSON: {scores: {mode: score, ...}}
+  env_override: ROUTER_CLASSIFIER_ENABLED
 
-# --- Telemetry ---
+  # ── v3 (Section 14) — LLM-assisted Router Arbiter ──
+  min_score_gap_to_skip:        0.10
+  max_cost_usd_per_call:        0.005
+  timeout_ms:                   3000
+  invoke_on_high_risk:          true
+  invoke_on_conflict:           true
+  invoke_on_no_clear_winner:    true
+  invoke_on_disabled_fallback:  true
+  invoke_on_multi_advanced:     true
+  invoke_on_legacy_divergence:  false
+  output_schema_version:        "1.0"
+  fail_open_to_heuristic:       true
+  required_fields:
+    - "scores"
+    - "reasoning"
+    - "confidence"
+  audit:
+    record_raw_scores:     true
+    record_tokens_used:    true
+    record_latency_ms:     true
+    record_trigger_reason: true
+
+# ── Telemetry ──
 telemetry:
   log_routing_decisions: true
-  record_signal_scores: true
-  audit_policy_version: true
+  record_signals:        true
+  record_explanation:    true
+  audit_policy_version:  true
+  emit_event:            router_decision_emitted
+
+# ── Legacy kill switch ──
+legacy:
+  enabled:     false
+  env_override: ROUTER_LEGACY_HEURISTIC
