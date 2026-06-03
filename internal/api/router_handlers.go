@@ -47,11 +47,12 @@ type RouteRequest struct {
 }
 
 type RouteResponse struct {
-	SessionID  string                `json:"session_id"`
-	WorkflowID string                `json:"workflow_id"`
-	RunID      string                `json:"run_id"`
-	Decision   types.RoutingDecision `json:"decision"`
-	Status     string                `json:"status"`
+	SessionID        string                          `json:"session_id"`
+	WorkflowID       string                          `json:"workflow_id"`
+	RunID            string                          `json:"run_id"`
+	Decision         types.RoutingDecision           `json:"decision"`
+	FrontendContract *types.FrontendRouterContract   `json:"frontend_contract,omitempty"`
+	Status           string                          `json:"status"`
 }
 
 func (h *RouteHandler) Route(w http.ResponseWriter, r *http.Request) {
@@ -117,11 +118,12 @@ func (h *RouteHandler) Route(w http.ResponseWriter, r *http.Request) {
 	}
 
 	WriteJSON(w, http.StatusOK, RouteResponse{
-		SessionID:  sessionID,
-		WorkflowID: workflowID,
-		RunID:      runID,
-		Decision:   result.Decision,
-		Status:     result.Status,
+		SessionID:        sessionID,
+		WorkflowID:       workflowID,
+		RunID:            runID,
+		Decision:         result.Decision,
+		FrontendContract: BuildFrontendContract(result.Decision, nil),
+		Status:           result.Status,
 	})
 }
 
@@ -131,16 +133,17 @@ func (h *RouteHandler) Route(w http.ResponseWriter, r *http.Request) {
 // async execute-routed. In async mode (HTTP 202), FinalAnswerText is
 // empty; the client polls GET /api/v1/tasks/{workflow_id}/result.
 type ExecuteRoutedResponse struct {
-	SessionID         string                 `json:"session_id"`
-	TaskID            string                 `json:"task_id,omitempty"`
-	WorkflowID        string                 `json:"workflow_id"`
-	RunID             string                 `json:"run_id"`
-	Decision          types.RoutingDecision  `json:"decision"`
-	Status            string                 `json:"status"`
-	FinalAnswerText   string                 `json:"final_answer_text,omitempty"`
-	FinalAnswerRef    string                 `json:"final_answer_ref,omitempty"`
-	PendingApprovalID string                 `json:"pending_approval_id,omitempty"`
-	Reason            string                 `json:"reason,omitempty"`
+	SessionID         string                        `json:"session_id"`
+	TaskID            string                        `json:"task_id,omitempty"`
+	WorkflowID        string                        `json:"workflow_id"`
+	RunID             string                        `json:"run_id"`
+	Decision          types.RoutingDecision         `json:"decision"`
+	FrontendContract  *types.FrontendRouterContract `json:"frontend_contract,omitempty"`
+	Status            string                        `json:"status"`
+	FinalAnswerText   string                        `json:"final_answer_text,omitempty"`
+	FinalAnswerRef    string                        `json:"final_answer_ref,omitempty"`
+	PendingApprovalID string                        `json:"pending_approval_id,omitempty"`
+	Reason            string                        `json:"reason,omitempty"`
 	// Async-only fields
 	Async        bool   `json:"async,omitempty"`
 	ResultURL    string `json:"result_url,omitempty"`
@@ -267,24 +270,25 @@ func (h *RouteHandler) ExecuteRouted(w http.ResponseWriter, r *http.Request) {
 	}
 
 	WriteJSON(w, http.StatusOK, ExecuteRoutedResponse{
-		SessionID:       sessionID,
-		TaskID:          taskID,
-		WorkflowID:      workflowID,
-		RunID:           runID,
-		Decision:        result.Decision,
-		Status:          result.Status,
-		FinalAnswerText: result.FinalAnswerText,
-		FinalAnswerRef:  result.FinalAnswerRef,
+		SessionID:        sessionID,
+		TaskID:           taskID,
+		WorkflowID:       workflowID,
+		RunID:            runID,
+		Decision:         result.Decision,
+		FrontendContract: BuildFrontendContract(result.Decision, nil),
+		Status:           result.Status,
+		FinalAnswerText:  result.FinalAnswerText,
+		FinalAnswerRef:   result.FinalAnswerRef,
 		PendingApprovalID: result.PendingApprovalID,
-		Reason:          result.Reason,
-		Provider:        result.Provider,
-		ModelUsed:       result.ModelUsed,
-		Mode:            result.Mode,
-		Mock:            result.Mock,
-		FallbackUsed:    result.FallbackUsed,
-		TokensUsed:      result.TokensUsed,
-		CostUSD:         result.CostUSD,
-		Metadata:        result.Metadata,
+		Reason:           result.Reason,
+		Provider:         result.Provider,
+		ModelUsed:        result.ModelUsed,
+		Mode:             result.Mode,
+		Mock:             result.Mock,
+		FallbackUsed:     result.FallbackUsed,
+		TokensUsed:       result.TokensUsed,
+		CostUSD:          result.CostUSD,
+		Metadata:         result.Metadata,
 	})
 }
 
@@ -294,15 +298,16 @@ func (h *RouteHandler) ExecuteRouted(w http.ResponseWriter, r *http.Request) {
 // HTTP 202 if still running; HTTP 200 with full result if completed;
 // HTTP 200 with status="failed" if the workflow failed.
 type TaskResultResponse struct {
-	TaskID     string                 `json:"task_id"`
-	WorkflowID string                 `json:"workflow_id,omitempty"`
-	RunID      string                 `json:"run_id,omitempty"`
-	SessionID  string                 `json:"session_id,omitempty"`
-	Status     string                 `json:"status"` // "running" | "completed" | "failed"
-	Result     *types.RoutedExecutionResult `json:"result,omitempty"`
-	Error      string                 `json:"error,omitempty"`
-	ErrorType  string                 `json:"error_type,omitempty"`
-	PolledAt   time.Time              `json:"polled_at"`
+	TaskID           string                        `json:"task_id"`
+	WorkflowID       string                        `json:"workflow_id,omitempty"`
+	RunID            string                        `json:"run_id,omitempty"`
+	SessionID        string                        `json:"session_id,omitempty"`
+	Status           string                        `json:"status"` // "running" | "completed" | "failed"
+	Result           *types.RoutedExecutionResult  `json:"result,omitempty"`
+	FrontendContract *types.FrontendRouterContract `json:"frontend_contract,omitempty"`
+	Error            string                        `json:"error,omitempty"`
+	ErrorType        string                        `json:"error_type,omitempty"`
+	PolledAt         time.Time                     `json:"polled_at"`
 }
 
 // GetTaskResult returns the structured RoutedExecutionResult for a
@@ -440,6 +445,12 @@ func (h *RouteHandler) GetTaskResult(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		resp.Result = &result
+		// Phase 7I: build a frontend contract from the decision so the
+		// client can render the explain panel without re-deriving
+		// anything. The full Explanation (candidates / rejected_modes
+		// / signals) is in the audit row, not the tasks row, so we
+		// only expose the decision-level fields here.
+		resp.FrontendContract = BuildFrontendContract(result.Decision, nil)
 		WriteJSON(w, http.StatusOK, resp)
 		return
 	default:
@@ -854,4 +865,189 @@ func (h *RouteHandler) ListTaskWorkspace(w http.ResponseWriter, r *http.Request)
 		"entries": domains,
 		"count":   len(domains),
 	})
+}
+
+// ─── FrontendRouterContract helper (Phase 7I v2) ──────────────────────
+
+// BuildFrontendContract constructs the API-facing contract from a
+// RoutingDecision and (optionally) the audit-side Explanation. Either
+// argument may be nil/empty; missing values are rendered as zero values
+// (empty strings, empty slices, 0) — never as JSON null — so the
+// frontend can consume the response shape unconditionally.
+func BuildFrontendContract(decision types.RoutingDecision, explanation *types.RouterDecisionExplanation) *types.FrontendRouterContract {
+	contract := &types.FrontendRouterContract{
+		SelectedMode:               decision.Mode,
+		PlannedMode:                decision.PlannedMode,
+		ExecutedMode:               decision.Mode,
+		FallbackReason:             decision.FallbackReason,
+		ApprovalRequired:           decision.RequiresApproval,
+		ApprovalReason:             decision.FallbackReason, // FallbackReason doubles as approval reason when gate fires
+		RiskLevel:                  decision.RiskLevel,
+		ModelTier:                  decision.ModelTier,
+		EstimatedCostUSD:           decision.V2EstimatedCostUSD,
+		EstimatedLatencyMs:         decision.V2EstimatedLatencyMs,
+		AsyncRequired:              decision.V2AsyncRequired,
+		AuditRequired:              decision.V2AuditRequired,
+		PolicyVersion:              decision.V2PolicyVersion,
+		WorkspaceArtifactsExpected: []string{},
+		AddonCapabilities:          []types.Capability{},
+		RequiredCapabilities:       []types.Capability{},
+		DisabledCapabilities:       []types.Capability{},
+		Candidates:                 []types.ModeCandidate{},
+		RejectedModes:              []types.RejectedMode{},
+		ScoreBreakdown:             map[string]float64{},
+		ReasonCodes:                []string{},
+	}
+
+	// Convert string addons from Decision (legacy string list) into
+	// typed []Capability so the contract is consistent.
+	if len(decision.V2AddonCapabilities) > 0 {
+		contract.AddonCapabilities = make([]types.Capability, 0, len(decision.V2AddonCapabilities))
+		for _, s := range decision.V2AddonCapabilities {
+			contract.AddonCapabilities = append(contract.AddonCapabilities, types.Capability(s))
+		}
+	}
+	if len(decision.V2RequiredCapabilities) > 0 {
+		contract.RequiredCapabilities = make([]types.Capability, 0, len(decision.V2RequiredCapabilities))
+		for _, s := range decision.V2RequiredCapabilities {
+			contract.RequiredCapabilities = append(contract.RequiredCapabilities, types.Capability(s))
+		}
+	}
+	if len(decision.V2DisabledCapabilities) > 0 {
+		contract.DisabledCapabilities = make([]types.Capability, 0, len(decision.V2DisabledCapabilities))
+		for _, s := range decision.V2DisabledCapabilities {
+			contract.DisabledCapabilities = append(contract.DisabledCapabilities, types.Capability(s))
+		}
+	}
+	if len(decision.V2WorkspaceArtifactsExpected) > 0 {
+		contract.WorkspaceArtifactsExpected = decision.V2WorkspaceArtifactsExpected
+	}
+
+	// From the audit-side explanation: signals-derived fields and
+	// per-candidate breakdown. When explanation is nil (legacy path),
+	// these stay at their zero-value defaults.
+	if explanation != nil {
+		if len(explanation.WorkspaceArtifactsExpected) > 0 {
+			contract.WorkspaceArtifactsExpected = explanation.WorkspaceArtifactsExpected
+		}
+		if explanation.PolicyVersion != "" {
+			contract.PolicyVersion = explanation.PolicyVersion
+		}
+		if explanation.EstimatedCostUSD > 0 {
+			contract.EstimatedCostUSD = explanation.EstimatedCostUSD
+		}
+		if explanation.EstimatedLatencyMs > 0 {
+			contract.EstimatedLatencyMs = explanation.EstimatedLatencyMs
+		}
+		if explanation.AsyncRequired {
+			contract.AsyncRequired = true
+		}
+		if explanation.AuditRequired {
+			contract.AuditRequired = true
+		}
+		if len(explanation.ScoreBreakdown) > 0 {
+			contract.ScoreBreakdown = make(map[string]float64, len(explanation.ScoreBreakdown))
+			for k, v := range explanation.ScoreBreakdown {
+				contract.ScoreBreakdown[string(k)] = v
+			}
+		}
+		if len(explanation.Candidates) > 0 {
+			contract.Candidates = explanation.Candidates
+		}
+		if len(explanation.RejectedModes) > 0 {
+			contract.RejectedModes = explanation.RejectedModes
+		}
+		contract.SelectedMode = explanation.SelectedMode
+		contract.ClassifierUsed = explanation.Signals.ClassifierUsed
+		// Human-readable summary
+		contract.FrontendExplanation = buildFrontendExplanation(explanation, decision)
+		if explanation.SelectedMode != "" {
+			contract.ReasonCodes = append(contract.ReasonCodes, "mode_"+string(explanation.SelectedMode))
+		}
+		for _, m := range explanation.RejectedModes {
+			contract.ReasonCodes = append(contract.ReasonCodes, "rejected_"+string(m.Mode)+":"+string(m.Reason))
+		}
+	}
+	if contract.SelectedMode == "" {
+		contract.SelectedMode = decision.Mode
+	}
+	return contract
+}
+
+// buildFrontendExplanation synthesises the human-readable explanation
+// from the audit-side explanation. Kept in this file so the contract
+// stays self-contained in the API layer.
+func buildFrontendExplanation(expl *types.RouterDecisionExplanation, decision types.RoutingDecision) *types.FrontendExplanation {
+	why := expl.SelectedReason
+	if why == "" {
+		why = "heuristic policy routing"
+	}
+	capabilitySummary := make([]string, 0, len(expl.AddonCapabilities))
+	for _, c := range expl.AddonCapabilities {
+		capabilitySummary = append(capabilitySummary, capabilityHuman(c))
+	}
+	costEstimate := fmt.Sprintf("约 $%.3f，预计 %d ms", expl.EstimatedCostUSD, expl.EstimatedLatencyMs)
+	return &types.FrontendExplanation{
+		SelectedModeHuman: modeHuman(expl.SelectedMode),
+		Why:               why,
+		CapabilitySummary: capabilitySummary,
+		CostEstimate:      costEstimate,
+		ApprovalNeeded:    decision.RequiresApproval,
+	}
+}
+
+func modeHuman(m types.RoutingMode) string {
+	switch m {
+	case types.RouteDirectAnswer:
+		return "直接回答"
+	case types.RouteRAGAnswer:
+		return "知识库检索"
+	case types.RouteReActTool:
+		return "工具调用"
+	case types.RouteDAGWorkflow:
+		return "DAG 多步工作流"
+	case types.RouteReflection:
+		return "反思改进"
+	case types.RouteTreeOfThoughts:
+		return "多路径探索"
+	case types.RouteDebate:
+		return "正反观点对比"
+	case types.RouteResearchV2:
+		return "研究综合"
+	case types.RouteSwarmWorkflow:
+		return "多 Agent 协作"
+	case types.RouteSandboxExecution:
+		return "沙箱代码执行"
+	default:
+		return string(m)
+	}
+}
+
+func capabilityHuman(c types.Capability) string {
+	switch c {
+	case types.CapRAG:
+		return "本地知识库检索"
+	case types.CapSandbox:
+		return "沙箱执行"
+	case types.CapSkills:
+		return "预设技能"
+	case types.CapMCPTools:
+		return "MCP 工具调用"
+	case types.CapCitations:
+		return "引用支持"
+	case types.CapWebSearch:
+		return "联网搜索"
+	case types.CapWorkspace:
+		return "Workspace 存储"
+	case types.CapAudit:
+		return "审计记录"
+	case types.CapApproval:
+		return "等待人工审批"
+	case types.CapReflection:
+		return "反思 pass"
+	case types.CapDebate:
+		return "辩论 pass"
+	default:
+		return string(c)
+	}
 }

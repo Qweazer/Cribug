@@ -87,6 +87,8 @@ func AdvancedRoutingWorkflow(ctx workflow.Context, input types.RouteRequest) (*t
 			RequireCitations: input.RequireCitations,
 			BudgetUSD:        input.BudgetUSD,
 			RouterConfig:     input.RouterConfig,
+			Query:            input.Query,
+			UserIntent:       input.UserIntent,
 		},
 	).Get(ctx, &policyResult)
 	if err != nil {
@@ -173,6 +175,12 @@ func AdvancedRoutingWorkflow(ctx workflow.Context, input types.RouteRequest) (*t
 				RunID:       runID,
 				Decision:    decision,
 				PolicyTrace: decision.Reason,
+				// Phase 7I v2: persist signals + explanation into the
+				// 016 JSONB columns. They are written only when the
+				// activity returned them (legacy callers leave them nil
+				// and the columns stay NULL — backward compatible).
+				Signals:     policyResult.Signals,
+				Explanation: policyResult.Explanation,
 			},
 		).Get(ctx, nil)
 	}

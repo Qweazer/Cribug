@@ -18,7 +18,9 @@ type RouterActivities struct {
 
 // NewRouterActivities creates a new RouterActivities instance.
 func NewRouterActivities(db *sql.DB) *RouterActivities {
-	return &RouterActivities{db: db}
+	ra := &RouterActivities{db: db}
+	routerActivitiesSingleton = ra
+	return ra
 }
 
 // ─── ClassifyTaskComplexity ────────────────────────────────────────────
@@ -265,25 +267,40 @@ type EvaluateRoutingPolicyInput struct {
 	RequireCitations bool                       `json:"require_citations"`
 	BudgetUSD        float64                    `json:"budget_usd"`
 	RouterConfig     types.RouterConfigSnapshot `json:"router_config"`
+	// Phase 7I: Query + UserIntent are passed through to the signal
+	// builder so scoring has the exact text to keyword-match.
+	Query      string `json:"query,omitempty"`
+	UserIntent string `json:"user_intent,omitempty"`
 }
 
 type EvaluateRoutingPolicyResult struct {
-	Decision types.RoutingDecision `json:"decision"`
+	Decision    types.RoutingDecision         `json:"decision"`
+	Explanation *types.RouterDecisionExplanation `json:"explanation,omitempty"`
+	// Signals is the full multi-signal snapshot used to make the
+	// decision. Persisted into the audit trail for replay / debugging.
+	Signals *types.RouterDecisionSignals `json:"signals,omitempty"`
 }
 
 func (ra *RouterActivities) EvaluateRoutingPolicy(ctx context.Context, input EvaluateRoutingPolicyInput) (*EvaluateRoutingPolicyResult, error) {
 	cfg := input.RouterConfig
 
-	// Determine planned mode by complexity + capability
-	planned := selectPlannedMode(input)
+	// Phase 7I: multi-signal v2 path (with legacy fallback).
+	planned, expl := selectPlannedModeV2(ctx, input)
 
-	// Determine addons
+	// Determine executed mode (feature-flag + user-block gating,
+	// consulting policy YAML's disabled_behavior for fallback targets).
+	caps := types.CapabilityNeeds{
+		NeedsTools:    input.RequiresTools,
+		NeedsRAG:      input.RequiresRAG,
+		NeedsSandbox:  input.RequiresSandbox,
+		NeedsResearch: input.RequiresResearch,
+	}
+	executed, fallbackReason := resolveExecutedMode(planned, cfg, caps)
+
+	// Determine addons (legacy RouteAddons for backward compat).
 	addons := selectAddons(input, planned)
 
-	// Determine executed mode (feature-flag gating)
-	executed, fallbackReason := resolveExecutedMode(planned, cfg)
-
-	// Determine workflow type string
+	// Workflow type string
 	wfType := workflowTypeForMode(executed)
 
 	// Model tier
@@ -307,7 +324,7 @@ func (ra *RouterActivities) EvaluateRoutingPolicy(ctx context.Context, input Eva
 		FallbackReason:     fallbackReason,
 		AddonCapabilities:  addons,
 		WorkflowType:       wfType,
-		Reason:             fmt.Sprintf("complexity=%.2f risk=%s planned=%s executed=%s", input.ComplexityScore, input.RiskLevel, planned, executed),
+		Reason:             fmt.Sprintf("complexity=%.2f risk=%s planned=%s executed=%s score=%.2f", input.ComplexityScore, input.RiskLevel, planned, executed, expl.ScoreBreakdown[planned]),
 		ComplexityScore:    input.ComplexityScore,
 		RiskLevel:          input.RiskLevel,
 		RequiresApproval:   requiresApproval,
@@ -322,9 +339,27 @@ func (ra *RouterActivities) EvaluateRoutingPolicy(ctx context.Context, input Eva
 		TokenBudget:        tokenBudget,
 		CostBudgetUSD:      input.BudgetUSD,
 		Confidence:         0.80,
+		// Phase 7I v2 capability composition + frontend contract.
+		V2AddonCapabilities:       capsToStrings(expl.AddonCapabilities),
+		V2RequiredCapabilities:    capsToStrings(expl.RequiredCapabilities),
+		V2DisabledCapabilities:    capsToStrings(expl.DisabledCapabilities),
+		V2WorkspaceArtifactsExpected: expl.WorkspaceArtifactsExpected,
+		V2EstimatedCostUSD:        expl.EstimatedCostUSD,
+		V2EstimatedLatencyMs:      expl.EstimatedLatencyMs,
+		V2AsyncRequired:           expl.AsyncRequired,
+		V2AuditRequired:           expl.AuditRequired,
+		V2PolicyVersion:           expl.PolicyVersion,
 	}
 
-	return &EvaluateRoutingPolicyResult{Decision: decision}, nil
+	return &EvaluateRoutingPolicyResult{Decision: decision, Explanation: &expl, Signals: &expl.Signals}, nil
+}
+
+func capsToStrings(caps []types.Capability) []string {
+	out := make([]string, len(caps))
+	for i, c := range caps {
+		out[i] = string(c)
+	}
+	return out
 }
 
 func selectPlannedMode(input EvaluateRoutingPolicyInput) types.RoutingMode {
@@ -412,29 +447,134 @@ func selectAddons(input EvaluateRoutingPolicyInput, planned types.RoutingMode) [
 // taking feature flags into account. Research v2 falls back to research v1 when
 // disabled (since v1 is always available via Phase 6F). Other future modes
 // (reflection/tot/debate) return mode_disabled when their flags are off.
-func resolveExecutedMode(planned types.RoutingMode, cfg types.RouterConfigSnapshot) (types.RoutingMode, string) {
+// resolveExecutedMode decides the final mode from the planned mode,
+// consulting the policy YAML's `disabled_behavior` block for fallback
+// targets. Two distinct reasons trigger a fallback:
+//
+//  1. **Disabled by config** (feature flag off): look up
+//     `policy.DisabledBehavior[mode].WhenDisabled` for the fallback
+//     mode name. A literal "mode_disabled" or empty value means no
+//     fallback (gate closed).
+//  2. **User-blocked** (allow_<flag> = false in capability detection):
+//     look up `policy.DisabledBehavior[mode].WhenUserBlocks` for the
+//     fallback target. Default is `direct_answer`.
+//
+// The returned reason is a short, human-readable string written into
+// `Decision.FallbackReason` for audit / display.
+func resolveExecutedMode(planned types.RoutingMode, cfg types.RouterConfigSnapshot, caps types.CapabilityNeeds) (types.RoutingMode, string) {
+	// Fast-path: per-mode feature flags (v1 behaviour, kept for
+	// backward compatibility — the YAML lookup below is a superset).
 	switch planned {
-		case types.RouteReflection:
-			if !cfg.EnableReflection {
-				if cfg.EnableToT {
-					return types.RouteTreeOfThoughts, "enable_reflection=false; fallback to tree_of_thoughts"
-				}
-				return types.RouteModeDisabled, "enable_reflection=false"
-			}
+	case types.RouteReflection:
+		if !cfg.EnableReflection {
+			return resolveDisabledFallback(planned, "reflection", "enable_reflection=false", false, caps)
+		}
 	case types.RouteTreeOfThoughts:
 		if !cfg.EnableToT {
-			return types.RouteModeDisabled, "enable_tot=false"
+			return resolveDisabledFallback(planned, "tree_of_thoughts", "enable_tot=false", false, caps)
 		}
 	case types.RouteDebate:
 		if !cfg.EnableDebate {
-			return types.RouteModeDisabled, "enable_debate=false"
+			return resolveDisabledFallback(planned, "debate", "enable_debate=false", false, caps)
 		}
 	case types.RouteResearchV2:
 		if !cfg.EnableResearchV2 {
-			return types.RouteResearchV1, "research_v2_not_enabled_fallback_to_research_v1"
+			return resolveDisabledFallback(planned, "research_v2", "research_v2_not_enabled_fallback_to_research_v1", false, caps)
+		}
+	case types.RouteSandboxExecution:
+		// Sandbox is always gated by user flag, not config flag.
+		if !caps.NeedsSandbox {
+			return resolveDisabledFallback(planned, "sandbox_execution", "allow_sandbox=false", true, caps)
+		}
+	}
+
+	// User-blocked fallback for any mode that requires a capability the
+	// user disabled (handled here as a safety net in case the planned
+	// mode reaches resolveExecutedMode without an explicit case above).
+	switch planned {
+	case types.RouteReActTool, types.RouteDAGWorkflow:
+		if !caps.NeedsTools {
+			return resolveDisabledFallback(planned, modeKeyString(planned), "allow_tools=false", true, caps)
+		}
+	case types.RouteRAGAnswer:
+		if !caps.NeedsRAG {
+			return resolveDisabledFallback(planned, "rag_answer", "allow_rag=false", true, caps)
 		}
 	}
 	return planned, ""
+}
+
+// resolveDisabledFallback consults the policy YAML's DisabledBehavior
+// for a fallback mode name. When the YAML has no entry for the given
+// mode, defaults are: WhenDisabled="mode_disabled", WhenUserBlocks=
+// "direct_answer".
+func resolveDisabledFallback(planned types.RoutingMode, yamlKey, reason string, userBlocked bool, caps types.CapabilityNeeds) (types.RoutingMode, string) {
+	policy := getPolicy()
+	var fallbackName string
+	if policy != nil {
+		if entry, ok := policy.DisabledBehavior[yamlKey]; ok {
+			if userBlocked {
+				fallbackName = entry.WhenUserBlocks
+			} else {
+				fallbackName = entry.WhenDisabled
+			}
+		}
+	}
+	if fallbackName == "" {
+		if userBlocked {
+			fallbackName = "direct_answer"
+		} else {
+			fallbackName = "mode_disabled"
+		}
+	}
+	mode, ok := lookupRoutingMode(fallbackName)
+	if !ok {
+		// Unknown fallback target — degrade safely.
+		if userBlocked {
+			return types.RouteDirectAnswer, reason + "; unknown_fallback=" + fallbackName
+		}
+		return types.RouteModeDisabled, reason + "; unknown_fallback=" + fallbackName
+	}
+	return mode, reason + "; fallback=" + fallbackName
+}
+
+// modeKeyString returns the YAML key for a RoutingMode, used for
+// DisabledBehavior lookups. Routing mode names already use snake_case
+// matching the YAML keys, so this is identity in practice — but we keep
+// the indirection so future naming changes stay localised.
+func modeKeyString(m types.RoutingMode) string {
+	return string(m)
+}
+
+// lookupRoutingMode maps a YAML string back to a typed RoutingMode.
+func lookupRoutingMode(name string) (types.RoutingMode, bool) {
+	switch name {
+	case string(types.RouteDirectAnswer):
+		return types.RouteDirectAnswer, true
+	case string(types.RouteRAGAnswer):
+		return types.RouteRAGAnswer, true
+	case string(types.RouteReActTool):
+		return types.RouteReActTool, true
+	case string(types.RouteSandboxExecution):
+		return types.RouteSandboxExecution, true
+	case string(types.RouteDAGWorkflow):
+		return types.RouteDAGWorkflow, true
+	case string(types.RouteSwarmWorkflow):
+		return types.RouteSwarmWorkflow, true
+	case string(types.RouteReflection):
+		return types.RouteReflection, true
+	case string(types.RouteTreeOfThoughts):
+		return types.RouteTreeOfThoughts, true
+	case string(types.RouteDebate):
+		return types.RouteDebate, true
+	case string(types.RouteResearchV1):
+		return types.RouteResearchV1, true
+	case string(types.RouteResearchV2):
+		return types.RouteResearchV2, true
+	case "mode_disabled":
+		return types.RouteModeDisabled, true
+	}
+	return "", false
 }
 
 func workflowTypeForMode(mode types.RoutingMode) string {
@@ -540,6 +680,11 @@ type AuditRoutingDecisionInput struct {
 	RunID       string                `json:"run_id"`
 	Decision    types.RoutingDecision `json:"decision"`
 	PolicyTrace string                `json:"policy_trace"`
+	// Phase 7I v2 — persisted into the migration 016 JSONB columns.
+	// Both fields are optional (nil for legacy callers); driver.Valuer
+	// returns NULL for nil so existing audit rows remain valid.
+	Signals     *types.RouterDecisionSignals     `json:"signals,omitempty"`
+	Explanation *types.RouterDecisionExplanation `json:"explanation,omitempty"`
 }
 
 type AuditRoutingDecisionResult struct {
@@ -552,14 +697,33 @@ func (ra *RouterActivities) AuditRoutingDecision(ctx context.Context, input Audi
 	}
 
 	auditID := input.WorkflowID + ":routing:" + input.RunID[len(input.RunID)-8:]
+	// Build score_breakdown JSONB from Explanation.Candidates (we don't
+	// store the full map; just the score per mode from the candidate
+	// list, which is what frontend / regression tooling consumes).
+	var scoreBreakdownJSON []byte
+	if input.Explanation != nil {
+		if m, err := json.Marshal(input.Explanation.ScoreBreakdown); err == nil {
+			scoreBreakdownJSON = m
+		}
+	}
+	addonJSON := jsonAddonCapabilities(input.Explanation)
+	if len(addonJSON) == 0 {
+		addonJSON = nil
+	}
+	workspaceJSON := jsonWorkspaceArtifacts(input.Explanation)
+	if len(workspaceJSON) == 0 {
+		workspaceJSON = nil
+	}
 	_, err := ra.db.ExecContext(ctx, `
 		INSERT INTO routing_audit_logs
 			(session_id, workflow_id, run_id, planned_mode, mode, fallback_reason,
 			 complexity_score, risk_level, requires_approval, requires_rag, requires_tools,
 			 requires_sandbox, requires_reflection, requires_debate, requires_tot,
 			 requires_research_v2, model_tier, token_budget, cost_budget_usd,
-			 confidence, classifier_mode, short_reason, policy_trace_ref)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
+			 confidence, classifier_mode, short_reason, policy_trace_ref,
+			 signals_json, explanation_json, policy_version, score_breakdown_json,
+			 addon_capabilities, workspace_artifacts)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)`,
 		input.SessionID, input.WorkflowID, input.RunID,
 		string(input.Decision.PlannedMode), string(input.Decision.Mode), input.Decision.FallbackReason,
 		input.Decision.ComplexityScore, input.Decision.RiskLevel, input.Decision.RequiresApproval,
@@ -570,11 +734,52 @@ func (ra *RouterActivities) AuditRoutingDecision(ctx context.Context, input Audi
 		input.Decision.TokenBudget, input.Decision.CostBudgetUSD,
 		input.Decision.Confidence, "heuristic", input.PolicyTrace,
 		input.Decision.PolicyTraceRef,
+		input.Signals, input.Explanation,
+		nullablePolicyVersion(input.Explanation), scoreBreakdownJSON,
+		addonJSON, workspaceJSON,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("audit routing decision: %w", err)
 	}
 	return &AuditRoutingDecisionResult{AuditID: auditID}, nil
+}
+
+// nullablePolicyVersion returns the policy version from the explanation
+// or an empty string (so the column is never NULL when an explanation
+// was provided).
+func nullablePolicyVersion(e *types.RouterDecisionExplanation) interface{} {
+	if e == nil {
+		return nil
+	}
+	return e.PolicyVersion
+}
+
+// jsonAddonCapabilities marshals the addon capability list (or nil if no
+// explanation). Returned as []byte so pgx encodes it as JSONB. Marshal
+// errors on these typed structs are not recoverable; we drop the field
+// rather than fail the audit write.
+func jsonAddonCapabilities(e *types.RouterDecisionExplanation) []byte {
+	if e == nil {
+		return nil
+	}
+	b, err := json.Marshal(e.AddonCapabilities)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+// jsonWorkspaceArtifacts marshals the predicted workspace artifacts (or
+// nil if no explanation).
+func jsonWorkspaceArtifacts(e *types.RouterDecisionExplanation) []byte {
+	if e == nil {
+		return nil
+	}
+	b, err := json.Marshal(e.WorkspaceArtifactsExpected)
+	if err != nil {
+		return nil
+	}
+	return b
 }
 
 // ─── EmitRoutingEvent ──────────────────────────────────────────────────
@@ -792,11 +997,15 @@ func (ra *RouterActivities) UpdateTaskApprovalStatus(ctx context.Context, input 
 
 // ─── EnsureRouterTable ─────────────────────────────────────────────────
 
+// EnsureRouterTable is idempotent. It creates the base 010 schema and
+// adds the 016 v2 columns (JSONB) via ALTER TABLE IF NOT EXISTS so that
+// fresh databases get the full schema and existing databases (which have
+// already had 016 applied) remain untouched.
 func EnsureRouterTable(db *sql.DB) error {
 	if db == nil {
 		return nil
 	}
-	_, err := db.Exec(`
+	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS routing_audit_logs (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			session_id VARCHAR(100) NOT NULL,
@@ -825,6 +1034,18 @@ func EnsureRouterTable(db *sql.DB) error {
 			classification_tokens INTEGER,
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 		)
+	`); err != nil {
+		return err
+	}
+	// 016 v2 columns — idempotent. Same DDL as migrations/016_routing_signals.sql.
+	_, err := db.Exec(`
+		ALTER TABLE routing_audit_logs
+			ADD COLUMN IF NOT EXISTS signals_json JSONB,
+			ADD COLUMN IF NOT EXISTS explanation_json JSONB,
+			ADD COLUMN IF NOT EXISTS policy_version VARCHAR(20),
+			ADD COLUMN IF NOT EXISTS score_breakdown_json JSONB,
+			ADD COLUMN IF NOT EXISTS addon_capabilities JSONB,
+			ADD COLUMN IF NOT EXISTS workspace_artifacts JSONB
 	`)
 	return err
 }

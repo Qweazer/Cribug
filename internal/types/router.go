@@ -104,6 +104,16 @@ type RoutingDecision struct {
 	Confidence         float64                `json:"confidence"`
 	PolicyTraceRef     string                 `json:"policy_trace_ref,omitempty"`
 	Metadata           map[string]interface{} `json:"metadata,omitempty"`
+	// Phase 7I v2: capability composition + frontend contract.
+	V2AddonCapabilities       []string `json:"v2_addon_capabilities,omitempty"`
+	V2RequiredCapabilities    []string `json:"v2_required_capabilities,omitempty"`
+	V2DisabledCapabilities    []string `json:"v2_disabled_capabilities,omitempty"`
+	V2WorkspaceArtifactsExpected []string `json:"v2_workspace_artifacts_expected,omitempty"`
+	V2EstimatedCostUSD        float64  `json:"v2_estimated_cost_usd,omitempty"`
+	V2EstimatedLatencyMs      int      `json:"v2_estimated_latency_ms,omitempty"`
+	V2AsyncRequired           bool     `json:"v2_async_required,omitempty"`
+	V2AuditRequired           bool     `json:"v2_audit_required,omitempty"`
+	V2PolicyVersion           string   `json:"v2_policy_version,omitempty"`
 }
 
 // RoutedExecutionResult is the unified result returned by AdvancedRoutingWorkflow.
