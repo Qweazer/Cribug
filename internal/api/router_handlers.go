@@ -971,24 +971,74 @@ func BuildFrontendContract(decision types.RoutingDecision, explanation *types.Ro
 	if contract.SelectedMode == "" {
 		contract.SelectedMode = decision.Mode
 	}
+	// Always populate FrontendExplanation — callers may pass a nil
+	// explanation (e.g. preview / sync execute-routed before the
+	// audit row exists). Without this, the field is omitted and
+	// the frontend has to special-case its presence.
+	if contract.FrontendExplanation == nil {
+		contract.FrontendExplanation = buildFrontendExplanation(nil, decision)
+	}
+	// Score breakdown: prefer the explanation's full map; otherwise
+	// surface a minimal {selected: 1.0} so the field is never empty
+	// in the JSON (the frontend can always expect an object).
+	if len(contract.ScoreBreakdown) == 0 {
+		contract.ScoreBreakdown = map[string]float64{string(contract.SelectedMode): 1.0}
+	}
 	return contract
 }
 
 // buildFrontendExplanation synthesises the human-readable explanation
 // from the audit-side explanation. Kept in this file so the contract
 // stays self-contained in the API layer.
+//
+// The function is tolerant of nil explanation: when the caller only
+// has the decision (e.g. preview mode / sync execute-routed before
+// the workflow has finished writing the audit row), it still
+// produces a non-nil FrontendExplanation with the data the decision
+// carries.
 func buildFrontendExplanation(expl *types.RouterDecisionExplanation, decision types.RoutingDecision) *types.FrontendExplanation {
-	why := expl.SelectedReason
+	var (
+		why           string
+		selectedMode  types.RoutingMode
+		caps          []types.Capability
+		costUSD       float64
+		latencyMs     int
+	)
+	if expl != nil {
+		why = expl.SelectedReason
+		selectedMode = expl.SelectedMode
+		caps = expl.AddonCapabilities
+		costUSD = expl.EstimatedCostUSD
+		latencyMs = expl.EstimatedLatencyMs
+	}
+	if why == "" {
+		why = decision.Reason
+	}
 	if why == "" {
 		why = "heuristic policy routing"
 	}
-	capabilitySummary := make([]string, 0, len(expl.AddonCapabilities))
-	for _, c := range expl.AddonCapabilities {
+	if selectedMode == "" {
+		selectedMode = decision.Mode
+	}
+	if caps == nil {
+		caps = make([]types.Capability, 0, len(decision.V2AddonCapabilities))
+		for _, s := range decision.V2AddonCapabilities {
+			caps = append(caps, types.Capability(s))
+		}
+	}
+	if costUSD == 0 {
+		costUSD = decision.V2EstimatedCostUSD
+	}
+	if latencyMs == 0 {
+		latencyMs = decision.V2EstimatedLatencyMs
+	}
+	capabilitySummary := make([]string, 0, len(caps))
+	for _, c := range caps {
 		capabilitySummary = append(capabilitySummary, capabilityHuman(c))
 	}
-	costEstimate := fmt.Sprintf("约 $%.3f，预计 %d ms", expl.EstimatedCostUSD, expl.EstimatedLatencyMs)
+	costEstimate := fmt.Sprintf("约 $%.3f，预计 %d ms", costUSD, latencyMs)
 	return &types.FrontendExplanation{
-		SelectedModeHuman: modeHuman(expl.SelectedMode),
+		SelectedModeHuman: modeHuman(selectedMode),
 		Why:               why,
 		CapabilitySummary: capabilitySummary,
 		CostEstimate:      costEstimate,

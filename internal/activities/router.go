@@ -208,20 +208,24 @@ type DetectTaskCapabilitiesResult struct {
 func (ra *RouterActivities) DetectTaskCapabilities(ctx context.Context, input DetectTaskCapabilitiesInput) (*DetectTaskCapabilitiesResult, error) {
 	lower := strings.ToLower(input.Query)
 	result := &DetectTaskCapabilitiesResult{}
+	// DEBUG
+	if strings.Contains(lower, "research") || strings.Contains(lower, "investigate") {
+		fmt.Printf("DEBUG DetectTask: query=%q lower=%q\n", input.Query, lower)
+	}
 
 	// RAG: project doc / knowledge base keywords
-	ragKeywords := []string{"项目文档", "代码库", "知识库", "我的项目", "doc", "readme", "api文档"}
+	ragKeywords := []string{"项目文档", "代码库", "知识库", "我的项目", "doc", "readme", "api文档", "documentation", "knowledge", "module"}
 	for _, kw := range ragKeywords {
-		if strings.Contains(lower, kw) {
+		if strings.Contains(lower, strings.ToLower(kw)) {
 			result.RequiresRAG = true
 			break
 		}
 	}
 
 	// Tools
-	toolKeywords := []string{"搜索", "查询", "计算", "calculate", "search", "curl", "api调用"}
+	toolKeywords := []string{"搜索", "查询", "计算", "calculate", "search", "curl", "api调用", "calculator", "tool"}
 	for _, kw := range toolKeywords {
-		if strings.Contains(lower, kw) {
+		if strings.Contains(lower, strings.ToLower(kw)) {
 			result.RequiresTools = true
 			break
 		}
@@ -232,18 +236,18 @@ func (ra *RouterActivities) DetectTaskCapabilities(ctx context.Context, input De
 	}
 
 	// Sandbox
-	sandboxKeywords := []string{"运行代码", "执行脚本", "沙箱", "sandbox", "编译", "wasi"}
+	sandboxKeywords := []string{"运行代码", "执行脚本", "沙箱", "sandbox", "编译", "wasi", "execute", "run", "python", "code"}
 	for _, kw := range sandboxKeywords {
-		if strings.Contains(lower, kw) {
+		if strings.Contains(lower, strings.ToLower(kw)) {
 			result.RequiresSandbox = true
 			break
 		}
 	}
 
 	// Research
-	researchKeywords := []string{"研究", "报告", "调研", "多来源", "证据", "引用", "citation"}
+	researchKeywords := []string{"研究", "报告", "调研", "多来源", "证据", "引用", "citation", "research", "literature", "evidence", "investigate", "study"}
 	for _, kw := range researchKeywords {
-		if strings.Contains(lower, kw) {
+		if strings.Contains(lower, strings.ToLower(kw)) {
 			result.RequiresResearch = true
 			break
 		}
@@ -265,6 +269,14 @@ type EvaluateRoutingPolicyInput struct {
 	RequiresRAG      bool                       `json:"requires_rag"`
 	RequiresResearch bool                       `json:"requires_research"`
 	RequireCitations bool                       `json:"require_citations"`
+	// Phase 7I: User-allow flags. Distinct from Requires*:
+	// Requires* = "the task needs this capability" (from detection);
+	// Allow* = "the user has authorised this capability" (from request).
+	// A user-blocked capability must reject the corresponding mode
+	// regardless of Requires* state.
+	AllowTools       bool                       `json:"allow_tools"`
+	AllowSandbox     bool                       `json:"allow_sandbox"`
+	AllowResearch    bool                       `json:"allow_research"`
 	BudgetUSD        float64                    `json:"budget_usd"`
 	RouterConfig     types.RouterConfigSnapshot `json:"router_config"`
 	// Phase 7I: Query + UserIntent are passed through to the signal

@@ -48,9 +48,9 @@ func BuildDecisionSignals(input EvaluateRoutingPolicyInput) types.RouterDecision
 		RequiresCitations:  input.RequireCitations,
 		RequiresWebSearch:  false, // future capability
 
-		AllowTools:        input.RequiresTools,   // for now, inherit from capability detection
-		AllowSandbox:      input.RequiresSandbox, // (future: user flags from RouteRequest)
-		AllowResearch:     input.RequiresResearch,
+		AllowTools:        input.AllowTools,
+		AllowSandbox:      input.AllowSandbox,
+		AllowResearch:     input.AllowResearch,
 		AllowWebSearch:    false,
 		BudgetUSD:         input.BudgetUSD,
 		MaxLatencyMs:      30000, // default; future: from RouteRequest
@@ -176,6 +176,14 @@ func keywordSubScore(query string, keywords []string) float64 {
 
 // ScoreModes scores every registered mode against signals using policy
 // weights and returns a sorted list of ModeCandidate entries.
+//
+// After per-mode scoring, a "capability-driven boost" pass lifts the
+// modes that directly satisfy the detected capability needs. Without
+// this pass, the multi-signal v2 scorer can let direct_answer's base
+// score (0.50) win over a capability-aligned mode whose signal weight
+// is comparable. The boost is bounded so the base scoring still
+// matters; we just stop capability-aligned modes from being out-scored
+// by the trivial answer.
 func ScoreModes(signals types.RouterDecisionSignals) []types.ModeCandidate {
 	policy := getPolicy()
 	modes := []types.RoutingMode{
@@ -189,10 +197,64 @@ func ScoreModes(signals types.RouterDecisionSignals) []types.ModeCandidate {
 		c := scoreOneMode(mode, signals, policy)
 		candidates = append(candidates, c)
 	}
-	// Sort by score desc.
+	// Capability-driven boost: if a capability need is detected
+	// (Requires* flag set or score > 0.5), lift the mode that owns
+	// that capability. The boost is large enough to overcome a
+	// direct_answer base (0.50) but not so large that it overrides
+	// the heuristic's actual ranking.
+	boostCap := func(mode types.RoutingMode, amount float64) {
+		for i := range candidates {
+			if candidates[i].Mode == mode && !candidates[i].Rejected {
+				candidates[i].Score = clamp01(candidates[i].Score + amount)
+			}
+		}
+	}
+	if signals.RequiresRAG || signals.RagNeedScore > 0.5 {
+		boostCap(types.RouteRAGAnswer, 0.45)
+	}
+	if signals.RequiresTools || signals.ToolNeedScore > 0.5 {
+		// Both react_tool and dag_workflow satisfy the tools need.
+		// Boost 0.45 is large enough to overcome direct_answer's base
+		// 0.50 + complexity modifier.
+		boostCap(types.RouteReActTool, 0.45)
+		boostCap(types.RouteDAGWorkflow, 0.45)
+	}
+	if signals.RequiresResearch || signals.RequiresCitations {
+		// Research dominates tools when both fire: research_v2 is a
+		// superset of tool use (it can call tools internally).
+		boostCap(types.RouteResearchV2, 0.70)
+	}
+	// Reflection: keywords like "analyze" / "improve" / "critique".
+	// Threshold 0.4 (was 0.6) so short reflection-y queries still
+	// pass through; without this, direct_answer's base 0.50 wins.
+	if signals.ComplexityAnalyze >= 0.4 {
+		boostCap(types.RouteReflection, 0.30)
+	}
+	if signals.RequiresSandbox || signals.SandboxNeedScore > 0.5 {
+		// Sandbox is already hard-locked by capability_requirements;
+		// nothing extra to do here.
+		boostCap(types.RouteSandboxExecution, 0.0)
+	}
+	if signals.RequiresResearch || signals.RequiresCitations {
+		boostCap(types.RouteResearchV2, 0.30)
+	}
+	// Reflection: keywords like "analyze" / "improve" / "critique".
+	// Threshold 0.4 (was 0.6) so short reflection-y queries still
+	// pass through; without this, direct_answer's base 0.50 wins.
+	if signals.ComplexityAnalyze >= 0.4 {
+		boostCap(types.RouteReflection, 0.30)
+	}
+	// Sort by score desc; on ties prefer research_v2 over
+	// react_tool (research subsumes tool use).
 	for i := 0; i < len(candidates); i++ {
 		for j := i + 1; j < len(candidates); j++ {
 			if candidates[j].Score > candidates[i].Score {
+				candidates[i], candidates[j] = candidates[j], candidates[i]
+				continue
+			}
+			if candidates[j].Score == candidates[i].Score &&
+				candidates[j].Mode == types.RouteResearchV2 &&
+				candidates[i].Mode != types.RouteResearchV2 {
 				candidates[i], candidates[j] = candidates[j], candidates[i]
 			}
 		}

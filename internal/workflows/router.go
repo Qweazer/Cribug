@@ -85,6 +85,11 @@ func AdvancedRoutingWorkflow(ctx workflow.Context, input types.RouteRequest) (*t
 			RequiresRAG:      capabilityResult.RequiresRAG,
 			RequiresResearch: capabilityResult.RequiresResearch,
 			RequireCitations: input.RequireCitations,
+			// Phase 7I: forward user-allow flags so the router can
+			// reject modes whose capability the user has blocked.
+			AllowTools:       input.AllowTools,
+			AllowSandbox:     input.AllowSandbox,
+			AllowResearch:    input.AllowResearch,
 			BudgetUSD:        input.BudgetUSD,
 			RouterConfig:     input.RouterConfig,
 			Query:            input.Query,
