@@ -984,6 +984,21 @@ func BuildFrontendContract(decision types.RoutingDecision, explanation *types.Ro
 	if len(contract.ScoreBreakdown) == 0 {
 		contract.ScoreBreakdown = map[string]float64{string(contract.SelectedMode): 1.0}
 	}
+	// Phase 7I Fix-3: rejected_modes.reason plumbing. The
+	// explanation's Candidates carry a RejectReason per mode. Pull
+	// those into the contract so budget / latency / allow-flag
+	// rejections are surfaced (previously only forbidden-combination
+	// rejections made it through).
+	if explanation != nil {
+		for _, c := range explanation.Candidates {
+			if c.Rejected && c.RejectReason != "" {
+				contract.RejectedModes = append(contract.RejectedModes, types.RejectedMode{
+					Mode:   c.Mode,
+					Reason: c.RejectReason,
+				})
+			}
+		}
+	}
 	return contract
 }
 

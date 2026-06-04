@@ -259,7 +259,16 @@ func (ra *RouterActivities) DetectTaskCapabilities(ctx context.Context, input De
 	}
 
 	// Sandbox
-	sandboxKeywords := []string{"运行代码", "执行脚本", "沙箱", "sandbox", "编译", "wasi", "execute", "run", "python", "code"}
+	sandboxKeywords := []string{
+		"运行代码", "执行脚本", "沙箱", "sandbox", "编译", "wasi",
+		"execute", "run", "python", "code", "脚本",
+		// Phase 7I Fix-4: extended risk keywords. Any of these implies
+		// "the user is about to run untrusted / unknown code" and
+		// must trigger sandbox_execution + approval.
+		"未知脚本", "不可信代码", "未知来源", "未验证", "untrusted", "unknown script",
+		"读写文件", "临时文件", "临时目录", "read file", "write file",
+		"shell", "bash", "python code", "execute code",
+	}
 	for _, kw := range sandboxKeywords {
 		if strings.Contains(lower, strings.ToLower(kw)) {
 			result.RequiresSandbox = true
@@ -350,8 +359,14 @@ func (ra *RouterActivities) EvaluateRoutingPolicy(ctx context.Context, input Eva
 	// Token budget
 	tokenBudget := estimateTokenBudget(planned, input.ComplexityScore)
 
-	// Approval
-	requiresApproval := input.ComplexityScore >= 0.60 || input.RiskLevel == "high" || input.RiskLevel == "critical" || input.RequiresSandbox
+	// Approval. Phase 7I Fix-5: sandbox_execution ALWAYS requires
+	// approval regardless of risk level or complexity (per v3 §14.7).
+	requiresApproval := input.ComplexityScore >= 0.60 ||
+		input.RiskLevel == "high" ||
+		input.RiskLevel == "critical" ||
+		input.RequiresSandbox ||
+		executed == types.RouteSandboxExecution ||
+		planned == types.RouteSandboxExecution
 
 	decision := types.RoutingDecision{
 		PlannedMode:        planned,

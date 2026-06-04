@@ -63,6 +63,11 @@ type RouterDecisionSignals struct {
 	ComplexityDebate      float64
 	ComplexityExploration float64
 	ComplexityOverall     float64
+	// ComplexitySemantic is the union of 23 Chinese complex-intent
+	// categories. Phase 7I Fix-1 path: when present (>0.4) it
+	// lifts ComplexityOverall so the v2 router stops defaulting to
+	// direct_answer on short Chinese queries.
+	ComplexitySemantic    float64
 
 	// Capability requirements (from DetectTaskCapabilitiesActivity)
 	RequiresTools      bool

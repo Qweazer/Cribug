@@ -118,6 +118,45 @@ func BuildDecisionSignals(input EvaluateRoutingPolicyInput) types.RouterDecision
 		}
 	}
 
+	// ComplexitySemantic: a "semantic complexity" signal that captures
+	// Chinese complex intent words (分析/比较/正反观点/多方案/多路径/
+	// 推演/验收/上线/多角色/协作/研究报告/引用/工具调用/沙箱/不可信
+	// /未知/RAG/知识库/前端联调/审批/安全风险). This is the Phase 7I
+	// Fix-1 path that lifts v2 router out of the "always direct_answer"
+	// trap on short Chinese queries. The signal is the union of all
+	// 23 categories — if any is present, ComplexitySemantic > 0.
+	semanticComplexKeywords := []string{
+		"分析", "评估", "审视", "解析", "复盘", "拆解", "拆", "深入",
+		"比较", "对比", "vs", "versus", "对比分析",
+		"正反", "正方", "反方", "双方", "观点", "辩", "辩论", "pro", "con",
+		"方案", "多种", "多条", "多套", "几套", "几个", "多思路", "多路线",
+		"路径", "分支", "搜索", "推演", "推导", "推",
+		"验收", "review", "检查", "核对", "verify", "verification", "审计",
+		"上线", "deploy", "发布", "ship", "生产", "staging", "联调", "对接",
+		"多角色", "多 agent", "多智能体", "团队", "分工", "协作", "合作", "联合",
+		"研究报告", "research", "调研", "深入研究", "分析研究",
+		"引用", "citation", "引用来源", "with citations", "依据", "evidence",
+		"工具调用", "调用", "计算", "搜索工具", "tool", "tool call", "工具",
+		"沙箱", "sandbox", "wasi",
+		"不可信", "untrusted", "unknown script", "未知脚本", "未知来源", "未验证",
+		"执行脚本", "运行代码", "执行", "execute", "run ", "代码",
+		"读写文件", "临时文件", "临时目录", "/tmp", "read file", "write file",
+		"RAG", "知识库", "向量库", "向量数据库", "项目文档", "本地知识",
+		"前端联调", "前端", "ui", "ux", "联调", "接入", "对接前端",
+		"审批", "approve", "approval", "人工审批", "需要审批",
+		"安全风险", "安全", "risk", "compliance", "合规",
+		"untrusted", "shell", "bash", "python code", "execute code",
+	}
+	s.ComplexitySemantic = keywordSubScore(lower, semanticComplexKeywords) * 1.2
+	if s.ComplexitySemantic > 1 {
+		s.ComplexitySemantic = 1
+	}
+	// Lift ComplexityOverall so the "complex but short query" case
+	// doesn't get stuck at direct_answer's base 0.50.
+	if s.ComplexitySemantic > 0.4 {
+		s.ComplexityOverall = maxF(s.ComplexityOverall, 0.55+s.ComplexitySemantic*0.30)
+	}
+
 	// Budget / latency fit.
 	estCost := estimateCostForMode("research_v2", policy)
 	if s.BudgetUSD > 0 {
@@ -620,10 +659,19 @@ func applyClassifier(ctx context.Context, input EvaluateRoutingPolicyInput, sign
 	if trigger == "" {
 		return
 	}
-	if !policy.Classifier.Enabled || !classifierEnvEnabled() {
+	// Phase 7I Fix-5: when the env kill switch is on, allow the
+	// classifier to run even if the on-disk policy still defaults
+	// to enabled=false. This matches the activity-level relaxation
+	// and avoids a footgun where envs are set but the YAML is stale.
+	envOn := classifierEnvEnabled()
+	realOn := !policy.Classifier.RealTestOnly || realClassifierTestEnabled()
+	if !policy.Classifier.Enabled && !envOn {
 		return
 	}
-	if policy.Classifier.RealTestOnly && !realClassifierTestEnabled() {
+	if !envOn {
+		return
+	}
+	if !realOn {
 		return
 	}
 
@@ -670,6 +718,7 @@ func applyClassifier(ctx context.Context, input EvaluateRoutingPolicyInput, sign
 	}
 	expl.ClassifierMetadata = &audit
 	signals.ClassifierUsed = !out.Fallback
+	expl.Signals.ClassifierUsed = signals.ClassifierUsed
 
 	// v3 sandbox safety: the LLM MUST NOT downgrade a sandbox
 	// selection. If the heuristic selected sandbox_execution and the

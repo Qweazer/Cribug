@@ -50,15 +50,22 @@ func (ra *RouterActivities) LLMClassifierActivity(ctx context.Context, input typ
 	}
 
 	// Hard kill switches.
-	if !cfg.Enabled {
+	// Phase 7I Fix-5: treat the kill switches as layered — when
+	// the env kill switches are ON, also auto-enable the policy
+	// even if the YAML still says enabled=false. This avoids the
+	// common footgun where a smoke runs with env vars but the
+	// on-disk policy still has the default false.
+	envOn := classifierEnvEnabled()
+	realOn := !cfg.RealTestOnly || realClassifierTestEnabled()
+	if !cfg.Enabled && !envOn {
 		out.ErrorReason = "policy_classifier_disabled"
 		return out, nil
 	}
-	if !classifierEnvEnabled() {
+	if !envOn {
 		out.ErrorReason = "env_classifier_disabled"
 		return out, nil
 	}
-	if cfg.RealTestOnly && !realClassifierTestEnabled() {
+	if !realOn {
 		out.ErrorReason = "real_test_only_no_flag"
 		return out, nil
 	}
@@ -400,6 +407,57 @@ func checkClassifierConditions(signals types.RouterDecisionSignals, candidates [
 		if advanced >= 3 {
 			return "C7"
 		}
+	}
+
+	// C9 (Phase 7I Fix-2): suspicious direct_clear_winner. When the
+	// heuristic picked direct_answer (a clear winner) but the query
+	// carries semantic complexity signals (Chinese intent words /
+	// high ComplexitySemantic), the heuristic may have under-matched.
+	// The classifier should re-rank to confirm.
+	if signals.ComplexitySemantic > 0.5 {
+		top := candidates[0]
+		if top.Mode == types.RouteDirectAnswer {
+			return "suspicious_direct_clear_winner"
+		}
+		// Phase 7I Fix-2 (extended): even when the heuristic picked
+		// a non-direct mode, if ComplexitySemantic is high enough
+		// we still want a second opinion — the heuristic may have
+		// jumped to one advanced mode without confirming whether
+		// a different advanced mode (research_v2 vs debate) is
+		// actually a better fit. semantic_complexity_conflict.
+		if signals.ComplexitySemantic > 0.7 {
+			return "semantic_complexity_conflict"
+		}
+	}
+
+	// C10: require_citations + allow_research (research_v2 natural fit).
+	if signals.RequiresCitations && signals.AllowResearch {
+		return "research_natural_fit"
+	}
+
+	// C11: multiple advanced modes (≥2) have non-zero score.
+	if cfg.InvokeOnMultiAdvanced {
+		nonZero := 0
+		for _, c := range candidates {
+			if c.Rejected {
+				continue
+			}
+			if c.Score >= 0.3 {
+				switch c.Mode {
+				case types.RouteResearchV2, types.RouteDebate, types.RouteTreeOfThoughts,
+					types.RouteReflection, types.RouteSwarmWorkflow, types.RouteDAGWorkflow:
+					nonZero++
+				}
+			}
+		}
+		if nonZero >= 2 {
+			return "advanced_intent_under_direct_answer"
+		}
+	}
+
+	// C12: sandbox / untrusted code scenario.
+	if signals.SandboxNeedScore > 0.6 || signals.RequiresSandbox {
+		return "sandbox_under_review"
 	}
 
 	return ""

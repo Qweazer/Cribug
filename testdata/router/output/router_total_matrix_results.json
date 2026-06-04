@@ -26,7 +26,7 @@
     },
     "frontend_explanation": {
       "selected_mode_human": "直接回答",
-      "why": "complexity=0.00 risk=low planned=direct_answer executed=direct_answer score=0.49",
+      "why": "complexity=0.00 risk=low planned=direct_answer executed=direct_answer score=0.37",
       "capability_summary": [
         "Workspace 存储",
         "审计记录"
@@ -65,7 +65,7 @@
     },
     "frontend_explanation": {
       "selected_mode_human": "直接回答",
-      "why": "complexity=0.00 risk=low planned=direct_answer executed=direct_answer score=0.49",
+      "why": "complexity=0.00 risk=low planned=direct_answer executed=direct_answer score=0.37",
       "capability_summary": [
         "Workspace 存储",
         "审计记录"
@@ -105,7 +105,7 @@
     },
     "frontend_explanation": {
       "selected_mode_human": "工具调用",
-      "why": "complexity=0.00 risk=low planned=react_tool executed=react_tool score=0.77",
+      "why": "complexity=0.00 risk=low planned=react_tool executed=react_tool score=0.54",
       "capability_summary": [
         "MCP 工具调用",
         "Workspace 存储",
@@ -121,7 +121,7 @@
   {
     "case_id": "react_external_tool_intent",
     "name": "ReAct 外部工具调用",
-    "planned_mode": "direct_answer",
+    "planned_mode": "react_tool",
     "executed_mode": "direct_answer",
     "classifier_used": false,
     "classifier_reason": "",
@@ -134,6 +134,7 @@
     "async_required": false,
     "risk_level": "low",
     "addon_capabilities": [
+      "mcp_tools",
       "workspace",
       "audit"
     ],
@@ -145,18 +146,17 @@
     },
     "frontend_explanation": {
       "selected_mode_human": "直接回答",
-      "why": "complexity=0.00 risk=low planned=direct_answer executed=direct_answer score=0.49",
+      "why": "complexity=0.00 risk=low planned=react_tool executed=direct_answer score=0.28",
       "capability_summary": [
+        "MCP 工具调用",
         "Workspace 存储",
         "审计记录"
       ],
-      "cost_estimate": "约 $0.005，预计 2000 ms",
+      "cost_estimate": "约 $0.030，预计 8000 ms",
       "approval_needed": false
     },
-    "status": "FAIL",
-    "notes": [
-      "planned_mode='direct_answer' not in ['react_tool']"
-    ],
+    "status": "PASS",
+    "notes": [],
     "classification_only_note": ""
   },
   {
@@ -171,7 +171,7 @@
     "model_used": "small",
     "mock": false,
     "fallback_used": false,
-    "approval_required": true,
+    "approval_required": false,
     "async_required": false,
     "risk_level": "medium",
     "addon_capabilities": [
@@ -189,7 +189,7 @@
     },
     "frontend_explanation": {
       "selected_mode_human": "知识库检索",
-      "why": "complexity=0.30 risk=medium planned=rag_answer executed=rag_answer score=0.83; sandbox_execution_requires_approval",
+      "why": "complexity=0.30 risk=medium planned=rag_answer executed=rag_answer score=0.66",
       "capability_summary": [
         "本地知识库检索",
         "引用支持",
@@ -198,7 +198,7 @@
         "沙箱执行"
       ],
       "cost_estimate": "约 $0.020，预计 5000 ms",
-      "approval_needed": true
+      "approval_needed": false
     },
     "status": "PASS",
     "notes": [],
@@ -236,7 +236,7 @@
     },
     "frontend_explanation": {
       "selected_mode_human": "知识库检索",
-      "why": "complexity=0.25 risk=low planned=rag_answer executed=rag_answer score=0.92",
+      "why": "complexity=0.25 risk=low planned=rag_answer executed=rag_answer score=0.68",
       "capability_summary": [
         "本地知识库检索",
         "引用支持",
@@ -281,7 +281,7 @@
     },
     "frontend_explanation": {
       "selected_mode_human": "多路径探索",
-      "why": "complexity=0.45 risk=medium planned=reflection executed=tree_of_thoughts score=1.00",
+      "why": "complexity=0.45 risk=medium planned=reflection executed=tree_of_thoughts score=0.68",
       "capability_summary": [
         "Workspace 存储",
         "审计记录",
@@ -306,7 +306,7 @@
     "model_used": "small",
     "mock": false,
     "fallback_used": false,
-    "approval_required": true,
+    "approval_required": false,
     "async_required": true,
     "risk_level": "medium",
     "addon_capabilities": [
@@ -323,7 +323,7 @@
     },
     "frontend_explanation": {
       "selected_mode_human": "沙箱代码执行",
-      "why": "complexity=0.40 risk=medium planned=sandbox_execution executed=sandbox_execution score=0.75; sandbox_execution_requires_approval",
+      "why": "complexity=0.40 risk=medium planned=sandbox_execution executed=sandbox_execution score=0.58",
       "capability_summary": [
         "沙箱执行",
         "等待人工审批",
@@ -331,21 +331,22 @@
         "审计记录"
       ],
       "cost_estimate": "约 $0.050，预计 30000 ms",
-      "approval_needed": true
+      "approval_needed": false
     },
     "status": "FAIL",
     "notes": [
       "planned_mode='sandbox_execution' not in ['dag_workflow', 'swarm_workflow']",
       "candidates missing: ['dag_workflow', 'swarm_workflow']",
-      "classifier_expected=true but classifier_used=false"
+      "classifier_expected=true but classifier_used=false",
+      "sandbox_execution planned but approval_required=false"
     ],
     "classification_only_note": ""
   },
   {
     "case_id": "reflection_refine_plan",
     "name": "Reflection 改进计划",
-    "planned_mode": "direct_answer",
-    "executed_mode": "direct_answer",
+    "planned_mode": "reflection",
+    "executed_mode": "tree_of_thoughts",
     "classifier_used": false,
     "classifier_reason": "",
     "reason_codes": [],
@@ -354,7 +355,7 @@
     "mock": false,
     "fallback_used": false,
     "approval_required": false,
-    "async_required": false,
+    "async_required": true,
     "risk_level": "medium",
     "addon_capabilities": [
       "workspace",
@@ -364,29 +365,27 @@
     "rejected_modes": [],
     "candidates": [],
     "score_breakdown": {
-      "direct_answer": 1
+      "tree_of_thoughts": 1
     },
     "frontend_explanation": {
-      "selected_mode_human": "直接回答",
-      "why": "complexity=0.35 risk=medium planned=direct_answer executed=direct_answer score=0.50",
+      "selected_mode_human": "多路径探索",
+      "why": "complexity=0.35 risk=medium planned=reflection executed=tree_of_thoughts score=0.39",
       "capability_summary": [
         "Workspace 存储",
         "审计记录"
       ],
-      "cost_estimate": "约 $0.005，预计 2000 ms",
+      "cost_estimate": "约 $0.060，预计 30000 ms",
       "approval_needed": false
     },
-    "status": "FAIL",
-    "notes": [
-      "planned_mode='direct_answer' not in ['reflection', 'tree_of_thoughts']"
-    ],
+    "status": "PASS",
+    "notes": [],
     "classification_only_note": ""
   },
   {
     "case_id": "reflection_low_budget_degrade",
     "name": "Reflection 预算降级",
-    "planned_mode": "direct_answer",
-    "executed_mode": "direct_answer",
+    "planned_mode": "reflection",
+    "executed_mode": "tree_of_thoughts",
     "classifier_used": false,
     "classifier_reason": "",
     "reason_codes": [],
@@ -395,7 +394,7 @@
     "mock": false,
     "fallback_used": false,
     "approval_required": false,
-    "async_required": false,
+    "async_required": true,
     "risk_level": "medium",
     "addon_capabilities": [
       "workspace",
@@ -405,16 +404,16 @@
     "rejected_modes": [],
     "candidates": [],
     "score_breakdown": {
-      "direct_answer": 1
+      "tree_of_thoughts": 1
     },
     "frontend_explanation": {
-      "selected_mode_human": "直接回答",
-      "why": "complexity=0.40 risk=medium planned=direct_answer executed=direct_answer score=0.33",
+      "selected_mode_human": "多路径探索",
+      "why": "complexity=0.40 risk=medium planned=reflection executed=tree_of_thoughts score=0.23",
       "capability_summary": [
         "Workspace 存储",
         "审计记录"
       ],
-      "cost_estimate": "约 $0.005，预计 2000 ms",
+      "cost_estimate": "约 $0.060，预计 30000 ms",
       "approval_needed": false
     },
     "status": "FAIL",
@@ -426,8 +425,8 @@
   {
     "case_id": "tot_multi_path_architecture",
     "name": "ToT 多路径架构",
-    "planned_mode": "direct_answer",
-    "executed_mode": "direct_answer",
+    "planned_mode": "reflection",
+    "executed_mode": "tree_of_thoughts",
     "classifier_used": false,
     "classifier_reason": "",
     "reason_codes": [],
@@ -436,7 +435,7 @@
     "mock": false,
     "fallback_used": false,
     "approval_required": false,
-    "async_required": false,
+    "async_required": true,
     "risk_level": "medium",
     "addon_capabilities": [
       "workspace",
@@ -446,21 +445,20 @@
     "rejected_modes": [],
     "candidates": [],
     "score_breakdown": {
-      "direct_answer": 1
+      "tree_of_thoughts": 1
     },
     "frontend_explanation": {
-      "selected_mode_human": "直接回答",
-      "why": "complexity=0.50 risk=medium planned=direct_answer executed=direct_answer score=0.50",
+      "selected_mode_human": "多路径探索",
+      "why": "complexity=0.50 risk=medium planned=reflection executed=tree_of_thoughts score=0.42",
       "capability_summary": [
         "Workspace 存储",
         "审计记录"
       ],
-      "cost_estimate": "约 $0.005，预计 2000 ms",
+      "cost_estimate": "约 $0.060，预计 30000 ms",
       "approval_needed": false
     },
     "status": "FAIL",
     "notes": [
-      "planned_mode='direct_answer' not in ['reflection', 'tree_of_thoughts']",
       "classifier_expected=true but classifier_used=false"
     ],
     "classification_only_note": ""
@@ -468,7 +466,7 @@
   {
     "case_id": "tot_latency_blocked",
     "name": "ToT 延迟阻塞",
-    "planned_mode": "direct_answer",
+    "planned_mode": "react_tool",
     "executed_mode": "direct_answer",
     "classifier_used": false,
     "classifier_reason": "",
@@ -481,6 +479,7 @@
     "async_required": false,
     "risk_level": "low",
     "addon_capabilities": [
+      "mcp_tools",
       "workspace",
       "audit"
     ],
@@ -492,12 +491,13 @@
     },
     "frontend_explanation": {
       "selected_mode_human": "直接回答",
-      "why": "complexity=0.15 risk=low planned=direct_answer executed=direct_answer score=0.50",
+      "why": "complexity=0.15 risk=low planned=react_tool executed=direct_answer score=0.31",
       "capability_summary": [
+        "MCP 工具调用",
         "Workspace 存储",
         "审计记录"
       ],
-      "cost_estimate": "约 $0.005，预计 2000 ms",
+      "cost_estimate": "约 $0.030，预计 8000 ms",
       "approval_needed": false
     },
     "status": "FAIL",
@@ -509,7 +509,7 @@
   {
     "case_id": "debate_pro_con",
     "name": "Debate 正反观点",
-    "planned_mode": "direct_answer",
+    "planned_mode": "react_tool",
     "executed_mode": "direct_answer",
     "classifier_used": false,
     "classifier_reason": "",
@@ -522,6 +522,7 @@
     "async_required": false,
     "risk_level": "low",
     "addon_capabilities": [
+      "mcp_tools",
       "workspace",
       "audit"
     ],
@@ -533,17 +534,18 @@
     },
     "frontend_explanation": {
       "selected_mode_human": "直接回答",
-      "why": "complexity=0.10 risk=low planned=direct_answer executed=direct_answer score=0.50",
+      "why": "complexity=0.10 risk=low planned=react_tool executed=direct_answer score=0.27",
       "capability_summary": [
+        "MCP 工具调用",
         "Workspace 存储",
         "审计记录"
       ],
-      "cost_estimate": "约 $0.005，预计 2000 ms",
+      "cost_estimate": "约 $0.030，预计 8000 ms",
       "approval_needed": false
     },
     "status": "FAIL",
     "notes": [
-      "planned_mode='direct_answer' not in ['debate', 'tree_of_thoughts']",
+      "planned_mode='react_tool' not in ['debate', 'tree_of_thoughts']",
       "classifier_expected=true but classifier_used=false"
     ],
     "classification_only_note": ""
@@ -577,7 +579,7 @@
     },
     "frontend_explanation": {
       "selected_mode_human": "research_v1",
-      "why": "complexity=0.50 risk=medium planned=research_v2 executed=research_v1 score=1.00",
+      "why": "complexity=0.50 risk=medium planned=research_v2 executed=research_v1 score=0.68",
       "capability_summary": [
         "本地知识库检索",
         "引用支持",
@@ -606,7 +608,7 @@
     "model_used": "large",
     "mock": false,
     "fallback_used": false,
-    "approval_required": true,
+    "approval_required": false,
     "async_required": true,
     "risk_level": "high",
     "addon_capabilities": [
@@ -625,7 +627,7 @@
     },
     "frontend_explanation": {
       "selected_mode_human": "research_v1",
-      "why": "complexity=0.75 risk=high planned=research_v2 executed=research_v1 score=1.00; high_risk+sandbox",
+      "why": "complexity=0.75 risk=high planned=research_v2 executed=research_v1 score=0.68",
       "capability_summary": [
         "本地知识库检索",
         "引用支持",
@@ -635,7 +637,7 @@
         "等待人工审批"
       ],
       "cost_estimate": "约 $0.200，预计 120000 ms",
-      "approval_needed": true
+      "approval_needed": false
     },
     "status": "FAIL",
     "notes": [
@@ -646,7 +648,7 @@
   {
     "case_id": "research_blocked",
     "name": "Research 用户禁用",
-    "planned_mode": "direct_answer",
+    "planned_mode": "react_tool",
     "executed_mode": "direct_answer",
     "classifier_used": false,
     "classifier_reason": "",
@@ -659,6 +661,7 @@
     "async_required": false,
     "risk_level": "medium",
     "addon_capabilities": [
+      "mcp_tools",
       "workspace",
       "audit",
       "citations"
@@ -674,13 +677,14 @@
     },
     "frontend_explanation": {
       "selected_mode_human": "直接回答",
-      "why": "complexity=0.30 risk=medium planned=direct_answer executed=direct_answer score=0.26",
+      "why": "complexity=0.30 risk=medium planned=react_tool executed=direct_answer score=0.30",
       "capability_summary": [
+        "MCP 工具调用",
         "Workspace 存储",
         "审计记录",
         "引用支持"
       ],
-      "cost_estimate": "约 $0.005，预计 2000 ms",
+      "cost_estimate": "约 $0.030，预计 8000 ms",
       "approval_needed": false
     },
     "status": "FAIL",
@@ -701,7 +705,7 @@
     "model_used": "large",
     "mock": false,
     "fallback_used": false,
-    "approval_required": true,
+    "approval_required": false,
     "async_required": true,
     "risk_level": "high",
     "addon_capabilities": [
@@ -718,7 +722,7 @@
     },
     "frontend_explanation": {
       "selected_mode_human": "沙箱代码执行",
-      "why": "complexity=0.75 risk=high planned=sandbox_execution executed=sandbox_execution score=0.51; high_risk+sandbox",
+      "why": "complexity=0.75 risk=high planned=sandbox_execution executed=sandbox_execution score=0.44",
       "capability_summary": [
         "沙箱执行",
         "等待人工审批",
@@ -726,20 +730,21 @@
         "审计记录"
       ],
       "cost_estimate": "约 $0.050，预计 30000 ms",
-      "approval_needed": true
+      "approval_needed": false
     },
     "status": "FAIL",
     "notes": [
       "planned_mode='sandbox_execution' not in ['dag_workflow', 'debate', 'swarm_workflow']",
-      "classifier_expected=true but classifier_used=false"
+      "classifier_expected=true but classifier_used=false",
+      "sandbox_execution planned but approval_required=false"
     ],
     "classification_only_note": "swarm_workflow planning only; execution may fall back if feature off"
   },
   {
     "case_id": "swarm_budget_degrade",
     "name": "Swarm 预算降级",
-    "planned_mode": "direct_answer",
-    "executed_mode": "direct_answer",
+    "planned_mode": "reflection",
+    "executed_mode": "tree_of_thoughts",
     "classifier_used": false,
     "classifier_reason": "",
     "reason_codes": [],
@@ -748,7 +753,7 @@
     "mock": false,
     "fallback_used": false,
     "approval_required": false,
-    "async_required": false,
+    "async_required": true,
     "risk_level": "medium",
     "addon_capabilities": [
       "workspace",
@@ -758,20 +763,21 @@
     "rejected_modes": [],
     "candidates": [],
     "score_breakdown": {
-      "direct_answer": 1
+      "tree_of_thoughts": 1
     },
     "frontend_explanation": {
-      "selected_mode_human": "直接回答",
-      "why": "complexity=0.35 risk=medium planned=direct_answer executed=direct_answer score=0.35",
+      "selected_mode_human": "多路径探索",
+      "why": "complexity=0.35 risk=medium planned=reflection executed=tree_of_thoughts score=0.23",
       "capability_summary": [
         "Workspace 存储",
         "审计记录"
       ],
-      "cost_estimate": "约 $0.005，预计 2000 ms",
+      "cost_estimate": "约 $0.060，预计 30000 ms",
       "approval_needed": false
     },
     "status": "FAIL",
     "notes": [
+      "executed_mode='tree_of_thoughts' not in ['dag_workflow', 'direct_answer', 'reflection']",
       "rejected reasons missing: ['cost_exceeds_budget']"
     ],
     "classification_only_note": ""
@@ -788,7 +794,7 @@
     "model_used": "small",
     "mock": false,
     "fallback_used": false,
-    "approval_required": true,
+    "approval_required": false,
     "async_required": true,
     "risk_level": "medium",
     "addon_capabilities": [
@@ -805,7 +811,7 @@
     },
     "frontend_explanation": {
       "selected_mode_human": "沙箱代码执行",
-      "why": "complexity=0.30 risk=medium planned=sandbox_execution executed=sandbox_execution score=0.91; sandbox_execution_requires_approval",
+      "why": "complexity=0.30 risk=medium planned=sandbox_execution executed=sandbox_execution score=0.65",
       "capability_summary": [
         "沙箱执行",
         "等待人工审批",
@@ -813,11 +819,13 @@
         "审计记录"
       ],
       "cost_estimate": "约 $0.050，预计 30000 ms",
-      "approval_needed": true
+      "approval_needed": false
     },
     "status": "FAIL",
     "notes": [
-      "classifier_expected=true but classifier_used=false"
+      "classifier_expected=true but classifier_used=false",
+      "approval_required expected true, got false",
+      "sandbox_execution planned but approval_required=false"
     ],
     "classification_only_note": ""
   },
@@ -833,7 +841,7 @@
     "model_used": "small",
     "mock": false,
     "fallback_used": false,
-    "approval_required": true,
+    "approval_required": false,
     "async_required": false,
     "risk_level": "low",
     "addon_capabilities": [
@@ -852,7 +860,7 @@
     },
     "frontend_explanation": {
       "selected_mode_human": "直接回答",
-      "why": "complexity=0.20 risk=low planned=react_tool executed=direct_answer score=0.29; sandbox_execution_requires_approval",
+      "why": "complexity=0.20 risk=low planned=react_tool executed=direct_answer score=0.28",
       "capability_summary": [
         "MCP 工具调用",
         "Workspace 存储",
@@ -860,7 +868,7 @@
         "沙箱执行"
       ],
       "cost_estimate": "约 $0.030，预计 8000 ms",
-      "approval_needed": true
+      "approval_needed": false
     },
     "status": "FAIL",
     "notes": [
@@ -872,7 +880,7 @@
     "case_id": "sandbox_untrusted_code_risk",
     "name": "Sandbox 不可信代码风险",
     "planned_mode": "sandbox_execution",
-    "executed_mode": "mode_disabled",
+    "executed_mode": "sandbox_execution",
     "classifier_used": false,
     "classifier_reason": "",
     "reason_codes": [],
@@ -893,11 +901,11 @@
     "rejected_modes": [],
     "candidates": [],
     "score_breakdown": {
-      "mode_disabled": 1
+      "sandbox_execution": 1
     },
     "frontend_explanation": {
-      "selected_mode_human": "mode_disabled",
-      "why": "complexity=0.30 risk=medium planned=sandbox_execution executed=mode_disabled score=0.40",
+      "selected_mode_human": "沙箱代码执行",
+      "why": "complexity=0.30 risk=medium planned=sandbox_execution executed=sandbox_execution score=0.50",
       "capability_summary": [
         "沙箱执行",
         "等待人工审批",
@@ -944,7 +952,7 @@
     },
     "frontend_explanation": {
       "selected_mode_human": "research_v1",
-      "why": "complexity=0.55 risk=medium planned=research_v2 executed=research_v1 score=1.00",
+      "why": "complexity=0.55 risk=medium planned=research_v2 executed=research_v1 score=0.68",
       "capability_summary": [
         "本地知识库检索",
         "引用支持",
@@ -964,8 +972,8 @@
   {
     "case_id": "classifier_no_clear_winner",
     "name": "无 clear winner（classifier 必触发）",
-    "planned_mode": "sandbox_execution",
-    "executed_mode": "mode_disabled",
+    "planned_mode": "reflection",
+    "executed_mode": "tree_of_thoughts",
     "classifier_used": false,
     "classifier_reason": "",
     "reason_codes": [],
@@ -977,34 +985,30 @@
     "async_required": true,
     "risk_level": "medium",
     "addon_capabilities": [
-      "sandbox",
-      "approval",
       "workspace",
-      "audit"
+      "audit",
+      "sandbox"
     ],
     "disabled_capabilities": [],
     "rejected_modes": [],
     "candidates": [],
     "score_breakdown": {
-      "mode_disabled": 1
+      "tree_of_thoughts": 1
     },
     "frontend_explanation": {
-      "selected_mode_human": "mode_disabled",
-      "why": "complexity=0.55 risk=medium planned=sandbox_execution executed=mode_disabled score=0.39",
+      "selected_mode_human": "多路径探索",
+      "why": "complexity=0.55 risk=medium planned=reflection executed=tree_of_thoughts score=0.44",
       "capability_summary": [
-        "沙箱执行",
-        "等待人工审批",
         "Workspace 存储",
-        "审计记录"
+        "审计记录",
+        "沙箱执行"
       ],
-      "cost_estimate": "约 $0.050，预计 30000 ms",
+      "cost_estimate": "约 $0.060，预计 30000 ms",
       "approval_needed": false
     },
     "status": "FAIL",
     "notes": [
-      "planned_mode='sandbox_execution' not in ['dag_workflow', 'debate', 'reflection', 'tree_of_thoughts']",
-      "classifier_expected=true but classifier_used=false",
-      "sandbox_execution planned but approval_required=false"
+      "classifier_expected=true but classifier_used=false"
     ],
     "classification_only_note": ""
   },
@@ -1035,7 +1039,7 @@
     },
     "frontend_explanation": {
       "selected_mode_human": "直接回答",
-      "why": "complexity=0.05 risk=low planned=direct_answer executed=direct_answer score=0.49",
+      "why": "complexity=0.05 risk=low planned=direct_answer executed=direct_answer score=0.37",
       "capability_summary": [
         "Workspace 存储",
         "审计记录"
@@ -1050,8 +1054,8 @@
   {
     "case_id": "frontend_contract_full_payload",
     "name": "前端 contract 完整样本",
-    "planned_mode": "sandbox_execution",
-    "executed_mode": "mode_disabled",
+    "planned_mode": "reflection",
+    "executed_mode": "tree_of_thoughts",
     "classifier_used": false,
     "classifier_reason": "",
     "reason_codes": [],
@@ -1063,34 +1067,29 @@
     "async_required": true,
     "risk_level": "medium",
     "addon_capabilities": [
-      "sandbox",
-      "approval",
       "workspace",
-      "audit"
+      "audit",
+      "sandbox"
     ],
     "disabled_capabilities": [],
     "rejected_modes": [],
     "candidates": [],
     "score_breakdown": {
-      "mode_disabled": 1
+      "tree_of_thoughts": 1
     },
     "frontend_explanation": {
-      "selected_mode_human": "mode_disabled",
-      "why": "complexity=0.55 risk=medium planned=sandbox_execution executed=mode_disabled score=0.40",
+      "selected_mode_human": "多路径探索",
+      "why": "complexity=0.55 risk=medium planned=reflection executed=tree_of_thoughts score=0.44",
       "capability_summary": [
-        "沙箱执行",
-        "等待人工审批",
         "Workspace 存储",
-        "审计记录"
+        "审计记录",
+        "沙箱执行"
       ],
-      "cost_estimate": "约 $0.050，预计 30000 ms",
+      "cost_estimate": "约 $0.060，预计 30000 ms",
       "approval_needed": false
     },
-    "status": "FAIL",
-    "notes": [
-      "planned_mode='sandbox_execution' not in ['dag_workflow', 'reflection']",
-      "sandbox_execution planned but approval_required=false"
-    ],
+    "status": "PASS",
+    "notes": [],
     "classification_only_note": ""
   }
 ]
