@@ -186,7 +186,21 @@ func main() {
 	}
 
 	// Phase 7A: Advanced Strategy Router
-	routerActivities := activities.NewRouterActivities(dbClient.Stdlib())
+	// Wire to the LLM service so the LLM-assisted Router Arbiter
+	// (Phase 7I §14) actually invokes the provider when its
+	// kill switch is flipped via env (ROUTER_CLASSIFIER_ENABLED
+	// + REAL_ROUTER_CLASSIFIER_TEST). Falls back to deterministic
+	// mock when the LLM service is unreachable. model / max_tokens /
+	// temperature come from env (LLM_MODEL / LLM_MAX_TOKENS /
+	// LLM_TEMPERATURE) read directly inside the classifier activity
+	// at call time so config.go stays unchanged.
+	routerActivities := activities.NewRouterActivitiesWithLLM(
+		dbClient.Stdlib(),
+		cfg.LLMServiceURL,
+		"", // model: read from LLM_MODEL env inside callLLMService
+		0,  // max_tokens: read from LLM_MAX_TOKENS env
+		0,  // temperature: read from LLM_TEMPERATURE env
+	)
 	w.RegisterActivityWithOptions(routerActivities.ClassifyTaskComplexity, activity.RegisterOptions{Name: "ClassifyTaskComplexityActivity"})
 	w.RegisterActivityWithOptions(routerActivities.DetectTaskCapabilities, activity.RegisterOptions{Name: "DetectTaskCapabilitiesActivity"})
 	w.RegisterActivityWithOptions(routerActivities.EvaluateRoutingPolicy, activity.RegisterOptions{Name: "EvaluateRoutingPolicyActivity"})

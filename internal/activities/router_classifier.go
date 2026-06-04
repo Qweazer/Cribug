@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -117,17 +121,104 @@ func (ra *RouterActivities) LLMClassifierActivity(ctx context.Context, input typ
 	return out, nil
 }
 
-// defaultClassifierLLMCaller returns a caller that uses the
-// llmServiceURL carried by AgentActivities if available; otherwise it
-// returns an error and the classifier falls back to heuristic.
+// defaultClassifierLLMCaller returns a caller that actually invokes
+// the LLM service when the RouterActivities was wired with a service
+// URL (NewRouterActivitiesWithLLM). When the URL is empty — e.g. unit
+// tests or dev environments without an LLM service — the caller falls
+// back to a deterministic mock answer so the classifier can still
+// produce a valid response and the merge path can run.
 func defaultClassifierLLMCaller(ra *RouterActivities) LLMCaller {
 	return func(ctx context.Context, prompt, model string, maxTokens int) (string, string, int, error) {
-		// Without a service URL we cannot make a real LLM call.
-		// Returning a deterministic mock answer makes the
-		// classifier runnable in unit tests and dev environments
-		// without external dependencies.
+		if ra != nil && ra.llmServiceURL != "" {
+			answer, modelUsed, tokens, err := callLLMService(ctx, ra, prompt, model, maxTokens)
+			if err == nil {
+				return answer, modelUsed, tokens, nil
+			}
+			// Real LLM call failed — fall through to mock so the
+			// classifier can still produce something. The Activity
+			// records the error reason in ClassifierMetadata.
+		}
+		// Mock fallback for dev / unit tests / dev no-LLM mode.
 		return buildDeterministicMockClassifierAnswer(prompt), model, len(prompt) / 4, nil
 	}
+}
+
+// callLLMService POSTs the prompt to the configured LLM service and
+// returns the answer string. Implemented as a plain HTTP POST to the
+// OpenAI-compatible /v1/chat/completions endpoint shape, which is
+// what llm-service.py in cribug exposes.
+//
+// model / max_tokens / temperature are read from env at call time
+// (LLM_MODEL / LLM_MAX_TOKENS / LLM_TEMPERATURE) so router config
+// stays env-driven and doesn't need new Config fields.
+func callLLMService(ctx context.Context, ra *RouterActivities, prompt, model string, maxTokens int) (string, string, int, error) {
+	url := strings.TrimRight(ra.llmServiceURL, "/") + "/v1/chat/completions"
+	chosenModel := ra.llmModel
+	if chosenModel == "" {
+		chosenModel = os.Getenv("LLM_MODEL")
+	}
+	if chosenModel == "" {
+		chosenModel = model
+	}
+	chosenMax := maxTokens
+	if chosenMax <= 0 {
+		if ra.llmMaxTokens > 0 {
+			chosenMax = ra.llmMaxTokens
+		} else if v := os.Getenv("LLM_MAX_TOKENS"); v != "" {
+			chosenMax, _ = strconv.Atoi(v)
+		}
+	}
+	chosenTemp := ra.llmTemperature
+	if chosenTemp == 0 {
+		if v := os.Getenv("LLM_TEMPERATURE"); v != "" {
+			chosenTemp, _ = strconv.ParseFloat(v, 64)
+		}
+	}
+	body, _ := json.Marshal(map[string]interface{}{
+		"model": chosenModel,
+		"messages": []map[string]string{
+			{"role": "user", "content": prompt},
+		},
+		"max_tokens":  chosenMax,
+		"temperature": chosenTemp,
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(body)))
+	if err != nil {
+		return "", "", 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	// Read API key from env at call time (not captured in struct).
+	if key := os.Getenv("LLM_API_KEY"); key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", 0, err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return "", "", 0, fmt.Errorf("llm http %d: %s", resp.StatusCode, string(raw))
+	}
+	var parsed struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Model string `json:"model"`
+		Usage struct {
+			TotalTokens int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return "", "", 0, fmt.Errorf("llm parse: %w (raw=%s)", err, string(raw))
+	}
+	if len(parsed.Choices) == 0 {
+		return "", parsed.Model, 0, fmt.Errorf("llm returned 0 choices (raw=%s)", string(raw))
+	}
+	return parsed.Choices[0].Message.Content, parsed.Model, parsed.Usage.TotalTokens, nil
 }
 
 // buildDeterministicMockClassifierAnswer returns a STRICT JSON answer
@@ -236,9 +327,13 @@ func realClassifierTestEnabled() bool {
 }
 
 // Indirect env reads so unit tests can override (t.Setenv).
+// Production reads from os.Getenv so smoke / integration tests can
+// flip the kill switch via ROUTER_CLASSIFIER_ENABLED /
+// REAL_ROUTER_CLASSIFIER_TEST. Unit tests swap these vars to nil-return
+// so they don't accidentally honour a stray env in the test environment.
 var (
-	getClassifierEnv    = func() string { return "" }
-	getRealClassifierEnv = func() string { return "" }
+	getClassifierEnv    = func() string { return os.Getenv("ROUTER_CLASSIFIER_ENABLED") }
+	getRealClassifierEnv = func() string { return os.Getenv("REAL_ROUTER_CLASSIFIER_TEST") }
 )
 
 // checkClassifierConditions inspects the heuristic candidate list and

@@ -1,0 +1,457 @@
+{
+  "version": "1.0",
+  "description": "Cribug Router Final Total Smoke — 25 cases across all 10 planned modes. Each case lists allowed_planned_modes (set membership) so legitimate ambiguity (DAG vs Swarm, Reflection vs ToT) is allowed, but a single-rule unique mapping is still validated.",
+  "cases": [
+    {
+      "id": "direct_simple_fact",
+      "name": "简单事实问答",
+      "query": "法国首都是哪里？只回答城市名。",
+      "input": {
+        "budget_usd": 0.1,
+        "max_latency_ms": 30000,
+        "require_citations": false,
+        "allow_tools": true,
+        "allow_sandbox": true,
+        "allow_research": true,
+        "user_intent": ""
+      },
+      "expected": {
+        "allowed_planned_modes": ["direct_answer"],
+        "allowed_executed_modes": ["direct_answer"],
+        "must_have_addons": ["workspace", "audit"],
+        "must_not_have_addons": ["sandbox", "approval"],
+        "approval_required": false,
+        "async_required": false,
+        "classifier_expected": "false",
+        "frontend_contract_required": true
+      }
+    },
+    {
+      "id": "direct_short_explanation",
+      "name": "简短解释",
+      "query": "用三句话解释什么是向量数据库。",
+      "input": {
+        "budget_usd": 0.1,
+        "max_latency_ms": 30000,
+        "require_citations": false,
+        "allow_tools": true,
+        "allow_sandbox": true,
+        "allow_research": true
+      },
+      "expected": {
+        "allowed_planned_modes": ["direct_answer", "rag_answer"],
+        "must_have_addons": ["workspace", "audit"],
+        "approval_required": false,
+        "classifier_expected": "false",
+        "frontend_contract_required": true
+      }
+    },
+    {
+      "id": "react_safe_calculation",
+      "name": "ReAct 安全计算",
+      "query": "请计算 128 * 37 + 952，并给出计算步骤。",
+      "input": {
+        "budget_usd": 0.2,
+        "max_latency_ms": 30000,
+        "allow_tools": true,
+        "allow_sandbox": true,
+        "allow_research": true
+      },
+      "expected": {
+        "allowed_planned_modes": ["react_tool", "direct_answer"],
+        "must_have_addons": ["workspace", "audit"],
+        "classifier_expected": "false"
+      }
+    },
+    {
+      "id": "react_external_tool_intent",
+      "name": "ReAct 外部工具调用",
+      "query": "帮我调用可用工具检查当前任务状态，然后总结结果。",
+      "input": {
+        "budget_usd": 0.2,
+        "max_latency_ms": 30000,
+        "allow_tools": true,
+        "allow_sandbox": true,
+        "allow_research": true
+      },
+      "expected": {
+        "allowed_planned_modes": ["react_tool"],
+        "must_have_addons": ["workspace", "audit"],
+        "classifier_expected": "optional"
+      }
+    },
+    {
+      "id": "rag_local_knowledge",
+      "name": "RAG 本地知识库",
+      "query": "根据项目知识库中关于 Cribug Phase 6 的资料，说明 RAG、Sandbox、Skills 是怎么串起来的。",
+      "input": {
+        "budget_usd": 0.3,
+        "max_latency_ms": 60000,
+        "require_citations": false,
+        "allow_tools": true,
+        "allow_sandbox": true,
+        "allow_research": true
+      },
+      "expected": {
+        "allowed_planned_modes": ["rag_answer", "research_v2"],
+        "must_have_addons": ["workspace", "audit"],
+        "classifier_expected": "optional"
+      }
+    },
+    {
+      "id": "rag_blocked_by_user",
+      "name": "RAG 用户禁用",
+      "query": "根据知识库回答 Cribug 的 RAG 设计，但这次不允许使用 RAG 或外部检索。",
+      "input": {
+        "budget_usd": 0.2,
+        "max_latency_ms": 30000,
+        "allow_research": false,
+        "allow_tools": false
+      },
+      "expected": {
+        "allowed_planned_modes": ["rag_answer", "research_v2"],
+        "allowed_executed_modes": ["direct_answer"],
+        "must_have_addons": ["workspace", "audit"],
+        "disabled_modes_must_include": ["rag_answer", "research_v2"],
+        "classifier_expected": "optional"
+      }
+    },
+    {
+      "id": "dag_multi_step_pipeline",
+      "name": "DAG 多步流水线",
+      "query": "请按步骤完成：先分析这个需求属于哪类任务，再列出执行计划，然后生成一份验收清单。",
+      "input": {
+        "budget_usd": 0.4,
+        "max_latency_ms": 60000,
+        "allow_tools": true,
+        "allow_sandbox": true,
+        "allow_research": true
+      },
+      "expected": {
+        "allowed_planned_modes": ["dag_workflow", "reflection"],
+        "must_have_addons": ["workspace", "audit"],
+        "classifier_expected": "optional"
+      }
+    },
+    {
+      "id": "dag_or_swarm_ambiguous",
+      "name": "DAG vs Swarm 歧义（classifier 必触发）",
+      "query": "我要做一个 Agent 项目的最终上线检查，请把任务拆成后端、路由、RAG、Sandbox、前端联调几个部分，并安排执行顺序。",
+      "input": {
+        "budget_usd": 0.5,
+        "max_latency_ms": 90000,
+        "allow_tools": true,
+        "allow_sandbox": true,
+        "allow_research": true
+      },
+      "expected": {
+        "allowed_planned_modes": ["dag_workflow", "swarm_workflow"],
+        "classifier_expected": "true",
+        "classifier_must_invoke": true,
+        "classifier_reason_min_length": 20,
+        "candidates_must_include": ["dag_workflow", "swarm_workflow"]
+      }
+    },
+    {
+      "id": "reflection_refine_plan",
+      "name": "Reflection 改进计划",
+      "query": "请检查下面这个任务计划是否严谨，指出漏洞，然后给出修订版。重点看逻辑、验收标准和风险控制。",
+      "input": {
+        "budget_usd": 0.3,
+        "max_latency_ms": 60000,
+        "allow_tools": true,
+        "allow_sandbox": true,
+        "allow_research": true
+      },
+      "expected": {
+        "allowed_planned_modes": ["reflection", "tree_of_thoughts"],
+        "must_have_addons": ["workspace", "audit"],
+        "classifier_expected": "optional"
+      }
+    },
+    {
+      "id": "reflection_low_budget_degrade",
+      "name": "Reflection 预算降级",
+      "query": "请深度评估这个方案，并反复修订直到质量很高，但我的预算只有 0.01 美元。",
+      "input": {
+        "budget_usd": 0.01,
+        "max_latency_ms": 30000,
+        "allow_tools": true,
+        "allow_sandbox": true,
+        "allow_research": true
+      },
+      "expected": {
+        "allowed_planned_modes": ["reflection", "direct_answer"],
+        "must_have_addons": ["workspace", "audit"],
+        "rejected_modes_must_include_reasons": ["cost_exceeds_budget", "latency_exceeds_max"],
+        "classifier_expected": "false"
+      }
+    },
+    {
+      "id": "tot_multi_path_architecture",
+      "name": "ToT 多路径架构",
+      "query": "请探索三种不同路线来实现 Cribug 的高级 Router：纯启发式、多信号评分、LLM 辅助二级裁决。分别推演优缺点，最后选择最优方案。",
+      "input": {
+        "budget_usd": 0.5,
+        "max_latency_ms": 120000,
+        "allow_tools": true,
+        "allow_sandbox": true,
+        "allow_research": true
+      },
+      "expected": {
+        "allowed_planned_modes": ["tree_of_thoughts", "reflection"],
+        "must_have_addons": ["workspace", "audit"],
+        "classifier_expected": "true"
+      }
+    },
+    {
+      "id": "tot_latency_blocked",
+      "name": "ToT 延迟阻塞",
+      "query": "请多路径深入推演 5 种方案，但必须在 3 秒内完成。",
+      "input": {
+        "budget_usd": 0.5,
+        "max_latency_ms": 3000,
+        "allow_tools": true,
+        "allow_sandbox": true,
+        "allow_research": true
+      },
+      "expected": {
+        "allowed_executed_modes": ["direct_answer", "reflection"],
+        "rejected_modes_must_include_reasons": ["latency_exceeds_max"],
+        "classifier_expected": "false"
+      }
+    },
+    {
+      "id": "debate_pro_con",
+      "name": "Debate 正反观点",
+      "query": "请从正方和反方分别论证：Cribug 是否应该在 Router 中引入真实 LLM classifier？最后给出裁决。",
+      "input": {
+        "budget_usd": 0.4,
+        "max_latency_ms": 60000,
+        "allow_tools": true,
+        "allow_sandbox": true,
+        "allow_research": true
+      },
+      "expected": {
+        "allowed_planned_modes": ["debate", "tree_of_thoughts"],
+        "must_have_addons": ["workspace", "audit"],
+        "classifier_expected": "true"
+      }
+    },
+    {
+      "id": "debate_vs_research_ambiguous",
+      "name": "Debate vs Research 歧义",
+      "query": "请比较 LangGraph、AutoGen、Shannon 这类 Agent 框架路线，要求既有正反观点，也要给出资料依据和最终建议。",
+      "input": {
+        "budget_usd": 1.0,
+        "max_latency_ms": 120000,
+        "require_citations": true,
+        "allow_tools": true,
+        "allow_sandbox": true,
+        "allow_research": true
+      },
+      "expected": {
+        "allowed_planned_modes": ["research_v2", "debate"],
+        "classifier_expected": "true",
+        "candidates_must_include": ["research_v2", "debate"]
+      }
+    },
+    {
+      "id": "research_with_citations",
+      "name": "Research 引用",
+      "query": "请做一份带引用来源的研究报告：分析当前 AI Agent 框架在任务编排、工具调用、RAG、Sandbox、安全审批方面的常见架构模式。",
+      "input": {
+        "budget_usd": 1.0,
+        "max_latency_ms": 180000,
+        "require_citations": true,
+        "allow_tools": true,
+        "allow_sandbox": true,
+        "allow_research": true
+      },
+      "expected": {
+        "allowed_planned_modes": ["research_v2"],
+        "must_have_addons": ["rag", "citations", "workspace", "audit"],
+        "classifier_expected": "true"
+      }
+    },
+    {
+      "id": "research_blocked",
+      "name": "Research 用户禁用",
+      "query": "请做一份带引用来源的最新研究报告，但这次禁止联网和研究工具。",
+      "input": {
+        "budget_usd": 0.3,
+        "max_latency_ms": 60000,
+        "require_citations": true,
+        "allow_research": false,
+        "allow_tools": false
+      },
+      "expected": {
+        "allowed_executed_modes": ["direct_answer", "rag_answer"],
+        "disabled_modes_must_include": ["research_v2"],
+        "classifier_expected": "optional"
+      }
+    },
+    {
+      "id": "swarm_multi_agent_team",
+      "name": "Swarm 多 Agent 团队",
+      "query": "请让多个专业角色协作完成 Cribug 上线前评审：后端架构师、RAG 专家、Sandbox 安全专家、前端联调负责人、测试负责人分别给意见，然后汇总成最终结论。",
+      "input": {
+        "budget_usd": 0.8,
+        "max_latency_ms": 180000,
+        "allow_tools": true,
+        "allow_sandbox": true,
+        "allow_research": true
+      },
+      "expected": {
+        "allowed_planned_modes": ["swarm_workflow", "dag_workflow", "debate"],
+        "classifier_expected": "true",
+        "classification_only_note": "swarm_workflow planning only; execution may fall back if feature off"
+      }
+    },
+    {
+      "id": "swarm_budget_degrade",
+      "name": "Swarm 预算降级",
+      "query": "请用多 Agent 团队做完整技术评审，但预算只有 0.02 美元。",
+      "input": {
+        "budget_usd": 0.02,
+        "max_latency_ms": 60000,
+        "allow_tools": true,
+        "allow_sandbox": true,
+        "allow_research": true
+      },
+      "expected": {
+        "allowed_executed_modes": ["dag_workflow", "reflection", "direct_answer"],
+        "rejected_modes_must_include_reasons": ["cost_exceeds_budget"],
+        "classifier_expected": "false"
+      }
+    },
+    {
+      "id": "sandbox_execute_code",
+      "name": "Sandbox 执行代码",
+      "query": "请在安全沙箱中运行一段 Python 代码，计算斐波那契数列前 10 项，并返回输出。",
+      "input": {
+        "budget_usd": 0.5,
+        "max_latency_ms": 60000,
+        "allow_tools": true,
+        "allow_sandbox": true,
+        "allow_research": true
+      },
+      "expected": {
+        "allowed_planned_modes": ["sandbox_execution"],
+        "must_have_addons": ["sandbox", "approval", "workspace", "audit"],
+        "approval_required": true,
+        "classifier_expected": "true"
+      }
+    },
+    {
+      "id": "sandbox_blocked_by_user",
+      "name": "Sandbox 用户禁用",
+      "query": "请运行这段不可信代码，但我明确不允许使用 sandbox。",
+      "input": {
+        "budget_usd": 0.3,
+        "max_latency_ms": 30000,
+        "allow_tools": true,
+        "allow_sandbox": false,
+        "allow_research": true
+      },
+      "expected": {
+        "allowed_executed_modes": ["direct_answer"],
+        "rejected_modes_must_include_reasons": ["blocked_by_user_allow_flag"],
+        "classifier_expected": "false"
+      }
+    },
+    {
+      "id": "sandbox_untrusted_code_risk",
+      "name": "Sandbox 不可信代码风险",
+      "query": "请执行这段未知来源脚本，并允许它读写临时文件，帮我看结果。",
+      "input": {
+        "budget_usd": 0.5,
+        "max_latency_ms": 60000,
+        "allow_tools": true,
+        "allow_sandbox": true,
+        "allow_research": true
+      },
+      "expected": {
+        "approval_required": true,
+        "risk_level_min": "high",
+        "classifier_cannot_downgrade_to_non_sandbox": true
+      }
+    },
+    {
+      "id": "classifier_dag_vs_tot_vs_research",
+      "name": "3 个高级 mode 冲突",
+      "query": "请帮我设计一个 Cribug 前端对接前的最终验收方案：既要拆步骤，又要分析多个路线，还要给出可验证证据，但预算和时间都有限。",
+      "input": {
+        "budget_usd": 0.3,
+        "max_latency_ms": 60000,
+        "require_citations": true,
+        "allow_tools": true,
+        "allow_sandbox": true,
+        "allow_research": true
+      },
+      "expected": {
+        "allowed_planned_modes": ["dag_workflow", "tree_of_thoughts", "research_v2", "reflection"],
+        "classifier_expected": "true",
+        "classifier_must_invoke": true,
+        "candidates_must_include": ["dag_workflow", "tree_of_thoughts", "research_v2"]
+      }
+    },
+    {
+      "id": "classifier_no_clear_winner",
+      "name": "无 clear winner（classifier 必触发）",
+      "query": "请对这个方案做深入检查，必要时调用工具，必要时多路径推理，也可以做正反辩论，最后给我一个低成本可执行版本。",
+      "input": {
+        "budget_usd": 0.2,
+        "max_latency_ms": 60000,
+        "allow_tools": true,
+        "allow_sandbox": true,
+        "allow_research": true
+      },
+      "expected": {
+        "allowed_planned_modes": ["dag_workflow", "reflection", "tree_of_thoughts", "debate"],
+        "classifier_expected": "true",
+        "classifier_must_invoke": true
+      }
+    },
+    {
+      "id": "classifier_clear_winner_not_called",
+      "name": "Clear winner（classifier 不调）",
+      "query": "1+1 等于几？",
+      "input": {
+        "budget_usd": 0.05,
+        "max_latency_ms": 10000,
+        "allow_tools": true,
+        "allow_sandbox": true,
+        "allow_research": true
+      },
+      "expected": {
+        "allowed_planned_modes": ["direct_answer"],
+        "classifier_expected": "false",
+        "classifier_must_invoke": false
+      }
+    },
+    {
+      "id": "frontend_contract_full_payload",
+      "name": "前端 contract 完整样本",
+      "query": "我要在前端展示 Router 的决策过程：为什么选择这个模式、还有哪些候选模式、哪些能力被禁用、是否需要审批、是否会生成 workspace artifact。请执行一个中等复杂度任务并返回完整 routing contract。",
+      "input": {
+        "budget_usd": 0.4,
+        "max_latency_ms": 60000,
+        "allow_tools": true,
+        "allow_sandbox": true,
+        "allow_research": true
+      },
+      "expected": {
+        "allowed_planned_modes": ["dag_workflow", "reflection"],
+        "frontend_contract_required": true,
+        "frontend_contract_must_have_fields": [
+          "selected_mode", "planned_mode", "executed_mode", "fallback_reason",
+          "addon_capabilities", "required_capabilities", "disabled_capabilities",
+          "approval_required", "async_required", "workspace_artifacts_expected",
+          "candidates", "rejected_modes", "score_breakdown", "policy_version",
+          "frontend_explanation"
+        ]
+      }
+    }
+  ]
+}

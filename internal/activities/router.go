@@ -13,12 +13,35 @@ import (
 
 // RouterActivities holds dependencies needed by Router Activities.
 type RouterActivities struct {
-	db *sql.DB
+	db             *sql.DB
+	llmServiceURL  string
+	llmModel       string
+	llmMaxTokens   int
+	llmTemperature float64
 }
 
 // NewRouterActivities creates a new RouterActivities instance.
+// The LLM-related fields are optional; when llmServiceURL is empty the
+// classifier falls back to a deterministic mock (still preserving
+// fail_open_to_heuristic behaviour for invalid JSON / errors).
 func NewRouterActivities(db *sql.DB) *RouterActivities {
 	ra := &RouterActivities{db: db}
+	routerActivitiesSingleton = ra
+	return ra
+}
+
+// NewRouterActivitiesWithLLM creates a RouterActivities wired to a real
+// LLM service. classifier smoke scripts use this so the
+// LLMClassifierActivity actually invokes the provider instead of the
+// mock fallback.
+func NewRouterActivitiesWithLLM(db *sql.DB, llmServiceURL, llmModel string, llmMaxTokens int, llmTemperature float64) *RouterActivities {
+	ra := &RouterActivities{
+		db:             db,
+		llmServiceURL:  llmServiceURL,
+		llmModel:       llmModel,
+		llmMaxTokens:   llmMaxTokens,
+		llmTemperature: llmTemperature,
+	}
 	routerActivitiesSingleton = ra
 	return ra
 }
