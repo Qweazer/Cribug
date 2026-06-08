@@ -1,0 +1,50 @@
+{
+  "case_id": "fc_direct_simple",
+  "task_id": "route-591b9c6e-4cdf-4301-92ec-01e572b75168",
+  "status": "preview",
+  "planned_mode": "direct_answer",
+  "executed_mode": "direct_answer",
+  "fallback_reason": "",
+  "frontend_explanation": {
+    "selected_mode_human": "直接回答",
+    "why": "complexity=0.00 risk=low planned=direct_answer executed=direct_answer score=0.37",
+    "capability_summary": [
+      "Workspace 存储",
+      "审计记录"
+    ],
+    "cost_estimate": "约 $0.005，预计 2000 ms",
+    "approval_needed": false
+  },
+  "capability_summary": [
+    "Workspace 存储",
+    "审计记录"
+  ],
+  "addon_capabilities": [
+    "workspace",
+    "audit"
+  ],
+  "required_capabilities": [
+    "audit",
+    "workspace"
+  ],
+  "disabled_capabilities": [],
+  "workspace_artifacts_expected": [
+    "direct::final"
+  ],
+  "approval_required": false,
+  "async_required": false,
+  "candidates": [],
+  "rejected_modes": [],
+  "score_breakdown": {
+    "direct_answer": 1
+  },
+  "signals": {},
+  "classifier_used": false,
+  "classifier_reason": "",
+  "classifier_confidence": 0.0,
+  "provider": "",
+  "model_used": "small",
+  "mock": false,
+  "fallback_used": false,
+  "audit_url_hint": "http://127.0.0.1:8080/api/v1/tasks/route-591b9c6e-4cdf-4301-92ec-01e572b75168/routing-decision"
+}

@@ -1,0 +1,55 @@
+{
+  "case_id": "fc_react_calculation",
+  "task_id": "route-1e61746a-03e1-4544-8d84-dba7fdd7be9a",
+  "status": "preview",
+  "planned_mode": "react_tool",
+  "executed_mode": "react_tool",
+  "fallback_reason": "",
+  "frontend_explanation": {
+    "selected_mode_human": "工具调用",
+    "why": "complexity=0.00 risk=low planned=react_tool executed=react_tool score=0.54",
+    "capability_summary": [
+      "MCP 工具调用",
+      "Workspace 存储",
+      "审计记录"
+    ],
+    "cost_estimate": "约 $0.030，预计 8000 ms",
+    "approval_needed": false
+  },
+  "capability_summary": [
+    "MCP 工具调用",
+    "Workspace 存储",
+    "审计记录"
+  ],
+  "addon_capabilities": [
+    "mcp_tools",
+    "workspace",
+    "audit"
+  ],
+  "required_capabilities": [
+    "audit",
+    "workspace",
+    "mcp_tools"
+  ],
+  "disabled_capabilities": [],
+  "workspace_artifacts_expected": [
+    "react::final",
+    "react::tool_calls"
+  ],
+  "approval_required": false,
+  "async_required": false,
+  "candidates": [],
+  "rejected_modes": [],
+  "score_breakdown": {
+    "react_tool": 1
+  },
+  "signals": {},
+  "classifier_used": false,
+  "classifier_reason": "",
+  "classifier_confidence": 0.0,
+  "provider": "",
+  "model_used": "small",
+  "mock": false,
+  "fallback_used": false,
+  "audit_url_hint": "http://127.0.0.1:8080/api/v1/tasks/route-1e61746a-03e1-4544-8d84-dba7fdd7be9a/routing-decision"
+}

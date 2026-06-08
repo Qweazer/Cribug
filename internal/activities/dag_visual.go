@@ -37,9 +37,12 @@ type RecordDAGNodeStatusInput struct {
 	TaskID         string
 	WorkflowID     string
 	NodeID         string
-	Status         string // pending, running, completed, failed
+	Status         string
 	Layer          int
 	Dependencies   []string
+	NodeName       string
+	NodeInput      string
+	NodeType       string
 	StartedAtNs    int64
 	CompletedAtNs  int64
 	Error          string
@@ -69,9 +72,22 @@ func (a *DAGVisualActivities) RecordDAGNodeStatus(ctx context.Context, input Rec
 
 	// ========== Step 2: Merge fields ==========
 	nodeStatus := types.DAGNodeStatus{
-		NodeID: input.NodeID, // Always use input node_id
-		Status: input.Status, // Always update to latest status
-		Layer:  input.Layer,  // Always use input layer
+		NodeID: input.NodeID,
+		Status: input.Status,
+		Layer:  input.Layer,
+		Name:   input.NodeName,
+		Input:  input.NodeInput,
+		Type:   input.NodeType,
+	}
+	// Preserve existing Name/Input/Type if not provided in this update
+	if nodeStatus.Name == "" && existingNode.Name != "" {
+		nodeStatus.Name = existingNode.Name
+	}
+	if nodeStatus.Input == "" && existingNode.Input != "" {
+		nodeStatus.Input = existingNode.Input
+	}
+	if nodeStatus.Type == "" && existingNode.Type != "" {
+		nodeStatus.Type = existingNode.Type
 	}
 
 	// Merge dependencies: if input has non-empty deps, use them; otherwise keep existing

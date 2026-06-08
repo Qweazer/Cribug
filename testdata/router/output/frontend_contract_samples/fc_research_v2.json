@@ -1,0 +1,66 @@
+{
+  "case_id": "fc_research_v2",
+  "task_id": "route-c56c5fd6-02dd-47ac-a74b-522b3957a223",
+  "status": "preview",
+  "planned_mode": "research_v2",
+  "executed_mode": "research_v1",
+  "fallback_reason": "research_v2_not_enabled_fallback_to_research_v1; fallback=research_v1",
+  "frontend_explanation": {
+    "selected_mode_human": "research_v1",
+    "why": "complexity=0.75 risk=high planned=research_v2 executed=research_v1 score=0.68",
+    "capability_summary": [
+      "本地知识库检索",
+      "引用支持",
+      "Workspace 存储",
+      "审计记录",
+      "沙箱执行",
+      "等待人工审批"
+    ],
+    "cost_estimate": "约 $0.200，预计 120000 ms",
+    "approval_needed": false
+  },
+  "capability_summary": [
+    "本地知识库检索",
+    "引用支持",
+    "Workspace 存储",
+    "审计记录",
+    "沙箱执行",
+    "等待人工审批"
+  ],
+  "addon_capabilities": [
+    "rag",
+    "citations",
+    "workspace",
+    "audit",
+    "sandbox",
+    "approval"
+  ],
+  "required_capabilities": [
+    "audit",
+    "workspace",
+    "sandbox",
+    "citations"
+  ],
+  "disabled_capabilities": [],
+  "workspace_artifacts_expected": [
+    "research::report",
+    "research::executive_summary",
+    "research::evidence_table"
+  ],
+  "approval_required": false,
+  "async_required": true,
+  "candidates": [],
+  "rejected_modes": [],
+  "score_breakdown": {
+    "research_v1": 1
+  },
+  "signals": {},
+  "classifier_used": false,
+  "classifier_reason": "",
+  "classifier_confidence": 0.0,
+  "provider": "",
+  "model_used": "large",
+  "mock": false,
+  "fallback_used": false,
+  "audit_url_hint": "http://127.0.0.1:8080/api/v1/tasks/route-c56c5fd6-02dd-47ac-a74b-522b3957a223/routing-decision"
+}

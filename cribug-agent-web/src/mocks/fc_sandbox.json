@@ -1,0 +1,59 @@
+{
+  "case_id": "fc_sandbox",
+  "task_id": "route-3ebc2fe4-a38e-43fb-a24b-ad646d9f7bcf",
+  "status": "preview",
+  "planned_mode": "sandbox_execution",
+  "executed_mode": "sandbox_execution",
+  "fallback_reason": "",
+  "frontend_explanation": {
+    "selected_mode_human": "沙箱代码执行",
+    "why": "complexity=0.30 risk=medium planned=sandbox_execution executed=sandbox_execution score=0.65",
+    "capability_summary": [
+      "沙箱执行",
+      "等待人工审批",
+      "Workspace 存储",
+      "审计记录"
+    ],
+    "cost_estimate": "约 $0.050，预计 30000 ms",
+    "approval_needed": false
+  },
+  "capability_summary": [
+    "沙箱执行",
+    "等待人工审批",
+    "Workspace 存储",
+    "审计记录"
+  ],
+  "addon_capabilities": [
+    "sandbox",
+    "approval",
+    "workspace",
+    "audit"
+  ],
+  "required_capabilities": [
+    "audit",
+    "workspace",
+    "sandbox",
+    "mcp_tools"
+  ],
+  "disabled_capabilities": [],
+  "workspace_artifacts_expected": [
+    "sandbox::output",
+    "sandbox::logs"
+  ],
+  "approval_required": false,
+  "async_required": true,
+  "candidates": [],
+  "rejected_modes": [],
+  "score_breakdown": {
+    "sandbox_execution": 1
+  },
+  "signals": {},
+  "classifier_used": false,
+  "classifier_reason": "",
+  "classifier_confidence": 0.0,
+  "provider": "",
+  "model_used": "small",
+  "mock": false,
+  "fallback_used": false,
+  "audit_url_hint": "http://127.0.0.1:8080/api/v1/tasks/route-3ebc2fe4-a38e-43fb-a24b-ad646d9f7bcf/routing-decision"
+}

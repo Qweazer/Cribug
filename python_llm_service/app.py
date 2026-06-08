@@ -181,8 +181,12 @@ def chat(req: LLMRequest):
             )
 
             usage = result["usage"]
+            clean = result["content"]
+            if "<think>" in clean and "</think>" in clean:
+                import re
+                clean = re.sub(r'<think>.*?</think>', '', clean, flags=re.DOTALL).strip()
             return LLMResponse(
-                content=result["content"],
+                content=clean,
                 usage=Usage(
                     prompt_tokens=usage["prompt_tokens"],
                     completion_tokens=usage["completion_tokens"],

@@ -233,7 +233,7 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 					nodeResults[node.ID] = types.DAGNodeResult{
 						TaskID:        req.TaskID,
 						NodeID:        node.ID,
-						NodeType:      node.Type,
+					NodeType:      node.Type,
 						Status:        "skipped",
 						SkippedReason: skipReason,
 					}
@@ -244,6 +244,9 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 						Status:        types.NodeStatusSkipped,
 						Layer:         layerIdx,
 						Dependencies:  node.DependsOn,
+					NodeName:  node.Name,
+					NodeInput:      node.Input,
+					NodeType:       node.Type,
 						CompletedAtNs: nowNs,
 						Error:         skipReason,
 					}).Get(ctx, nil)
@@ -271,6 +274,9 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 				Status:       types.NodeStatusPending,
 				Layer:        layerIdx,
 				Dependencies: node.DependsOn,
+					NodeName:  node.Name,
+					NodeInput:      node.Input,
+					NodeType:       node.Type,
 				StartedAtNs: nowNs,
 			}).Get(ctx, nil)
 
@@ -290,6 +296,9 @@ func (dw *DAGWorkflow) Execute(ctx workflow.Context, req types.WorkflowTaskReque
 				Status:       types.NodeStatusRunning,
 				Layer:        layerIdx,
 				Dependencies: node.DependsOn,
+					NodeName:  node.Name,
+					NodeInput:      node.Input,
+					NodeType:       node.Type,
 				StartedAtNs:  nowNs,
 			}).Get(ctx, nil)
 
@@ -356,7 +365,7 @@ Output your answer directly:`, req.Query, upstreamContext, node.Name, node.Type)
 					nodeResults[node.ID] = types.DAGNodeResult{
 						TaskID:   req.TaskID,
 						NodeID:   node.ID,
-						NodeType: "llm",
+					NodeType: "llm",
 						Status:   "failed",
 						Error:    reactErr.Error(),
 					}
@@ -377,7 +386,7 @@ Output your answer directly:`, req.Query, upstreamContext, node.Name, node.Type)
 					nodeResults[node.ID] = types.DAGNodeResult{
 						TaskID:   req.TaskID,
 						NodeID:   node.ID,
-						NodeType: "llm",
+					NodeType: "llm",
 						Status:   "completed",
 						Output:   reactResult.FinalResult,
 					}

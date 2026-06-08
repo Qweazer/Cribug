@@ -12,19 +12,37 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func NewRouter(h *Handler) *chi.Mux {
 	r := chi.NewRouter()
 
+	r.Use(corsMiddleware)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
+
+	fe := NewFrontendAdapterHandler(h.db.Stdlib(), h.redis)
 
 	r.Get("/health", healthHandler(h.db.Ping, h.redis.Ping))
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Post("/tasks", h.createTask)
 		r.Get("/tasks/{id}", h.getTask)
 		r.Get("/tasks/{id}/dag", h.getDAG)
+		r.Get("/tasks/{id}/events", fe.ListTaskEvents)
 		r.Get("/stream/sse", h.streamTaskEvents)
 
 		// Phase 6A: MCP Tool Runtime
@@ -82,6 +100,14 @@ func NewRouter(h *Handler) *chi.Mux {
 		r.Put("/llm/config", llmCfgH.SaveConfig)
 		r.Get("/llm/config/effective", llmCfgH.GetEffectiveConfig)
 		r.Post("/llm/config/test", llmCfgH.TestConfig)
+
+		// Frontend adapter routes (cribug-agent-web compatibility)
+		r.Get("/sessions", fe.ListSessions)
+		r.Post("/sessions", fe.CreateSession)
+		r.Get("/sessions/{session_id}", fe.GetSession)
+		r.Get("/rag/status", fe.GetRagStatus)
+		r.Get("/sandbox/status", fe.GetSandboxStatus)
+		r.Get("/tools", fe.ListTools)
 	})
 
 	return r

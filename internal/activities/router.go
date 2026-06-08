@@ -1,6 +1,7 @@
 package activities
 
 import (
+	"log"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -414,6 +415,25 @@ func capsToStrings(caps []types.Capability) []string {
 
 func selectPlannedMode(input EvaluateRoutingPolicyInput) types.RoutingMode {
 	c := input.ComplexityScore
+	summary := strings.ToLower(input.ComplexitySummary)
+	query := strings.ToLower(input.Query)
+	log.Printf("[P7J-V1] query=%q summary=%q c=%f", query, summary, c)
+
+	// ── Phase 7J: Keyword short-circuit — multi-stage intents always go DAG ──
+	dagKeywords := []string{
+		"比较", "对比", "vs", "推荐", "挑选",
+		"分析", "拆解", "分解", "规划", "策划",
+		"列出", "列举", "步骤", "流程", "方案",
+		"设计", "架构", "选型", "评估",
+		"compare", "analyze", "plan", "list", "steps",
+		"design", "architect", "evaluate", "recommend",
+		"为什么", "如何", "怎么",
+	}
+	for _, kw := range dagKeywords {
+		if strings.Contains(summary, kw) || strings.Contains(query, kw) {
+			return types.RouteDAGWorkflow
+		}
+	}
 
 	// Sandbox
 	if input.RequiresSandbox {
@@ -429,7 +449,7 @@ func selectPlannedMode(input EvaluateRoutingPolicyInput) types.RoutingMode {
 	}
 
 	// ToT: multi-path exploration/comparison at high complexity (c >= 0.60, before Swarm)
-	if c >= 0.60 {
+	if c >= 0.50 {
 		return types.RouteTreeOfThoughts
 	}
 
@@ -444,17 +464,20 @@ func selectPlannedMode(input EvaluateRoutingPolicyInput) types.RoutingMode {
 	}
 
 	// Swarm (very high complexity with multi-agent keywords, c >= 0.70)
-	if c >= 0.70 {
+	if c >= 0.60 {
 		return types.RouteSwarmWorkflow
 	}
 
-	// DAG (medium-high complexity, decomposable, with tools)
-	if input.RequiresTools && c >= 0.45 {
+	// DAG (Phase 7J: lowered — any non-trivial complexity)
+	if input.RequiresTools && c >= 0.15 {
+		return types.RouteDAGWorkflow
+	}
+	if c >= 0.15 {
 		return types.RouteDAGWorkflow
 	}
 
 	// Reflection: medium complexity writing/analysis tasks
-	if c >= 0.35 {
+	if c >= 0.25 {
 		return types.RouteReflection
 	}
 

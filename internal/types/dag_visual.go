@@ -3,9 +3,13 @@ package types
 // DAGNodeStatus represents the real-time status of a DAG node
 type DAGNodeStatus struct {
 	NodeID        string   `json:"node_id"`
-	Status        string   `json:"status"` // pending, running, completed, failed
+	Status        string   `json:"status"`
 	Layer         int      `json:"layer"`
-	Dependencies  []string `json:"dependencies"` // Always include, even if empty
+	Dependencies  []string `json:"dependencies"`
+	Name          string   `json:"name,omitempty"`
+	Input         string   `json:"input,omitempty"`
+	Type          string   `json:"type,omitempty"`
+	Output        string   `json:"output,omitempty"`
 	StartedAtNs   int64    `json:"started_at_ns,omitempty"`
 	CompletedAtNs int64    `json:"completed_at_ns,omitempty"`
 	Error         string   `json:"error,omitempty"`

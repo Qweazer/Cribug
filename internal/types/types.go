@@ -123,7 +123,7 @@ type Task struct {
 
 func NormalizeConfig(cfg *TaskConfig) (maxTotalTokens, maxCompletionTokens int, model string, temperature float64) {
 	maxTotalTokens = 8000
-	maxCompletionTokens = 1024
+	maxCompletionTokens = 4096
 	model = "gpt-4o-mini"
 	temperature = 0.7
 

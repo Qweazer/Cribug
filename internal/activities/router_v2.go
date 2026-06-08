@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"log"
 
 	"cribug/internal/config"
 	"cribug/internal/types"
@@ -545,6 +546,30 @@ func isAsyncRequired(mode types.RoutingMode) bool {
 // the classifier is disabled (the default), the ctx is unused and the
 // heuristic path is purely deterministic.
 func selectPlannedModeV2(ctx context.Context, input EvaluateRoutingPolicyInput) (types.RoutingMode, types.RouterDecisionExplanation) {
+	// ── Phase 7J: Keyword short-circuit (override V2 scoring) ──
+	{
+		summary := strings.ToLower(input.ComplexitySummary)
+		query := strings.ToLower(input.Query)
+		dagKeywords := []string{
+			"比较", "对比", "vs", "推荐", "挑选",
+			"分析", "拆解", "分解", "规划", "策划",
+			"列出", "列举", "步骤", "流程", "方案",
+			"设计", "架构", "选型", "评估",
+			"compare", "analyze", "plan", "list", "steps",
+			"design", "architect", "evaluate", "recommend",
+		}
+		for _, kw := range dagKeywords {
+			if strings.Contains(summary, kw) || strings.Contains(query, kw) {
+							return types.RouteDAGWorkflow, types.RouterDecisionExplanation{
+					SelectedMode:   types.RouteDAGWorkflow,
+					SelectedReason: "phase7j: keyword short-circuit (" + kw + ")",
+					PolicyVersion:  "phase7j",
+					AuditRequired:  true,
+				}
+			}
+		}
+	}
+
 	// Legacy kill switch: fall back to old if/else chain.
 	if config.LegacyHeuristicEnabled() {
 		mode := selectPlannedMode(input)

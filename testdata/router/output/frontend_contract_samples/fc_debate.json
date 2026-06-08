@@ -1,0 +1,54 @@
+{
+  "case_id": "fc_debate",
+  "task_id": "route-1f1d41d1-edee-4bcf-8796-a657954bbfa3",
+  "status": "preview",
+  "planned_mode": "react_tool",
+  "executed_mode": "direct_answer",
+  "fallback_reason": "allow_tools=false; fallback=direct_answer",
+  "frontend_explanation": {
+    "selected_mode_human": "直接回答",
+    "why": "complexity=0.10 risk=low planned=react_tool executed=direct_answer score=0.27",
+    "capability_summary": [
+      "MCP 工具调用",
+      "Workspace 存储",
+      "审计记录"
+    ],
+    "cost_estimate": "约 $0.030，预计 8000 ms",
+    "approval_needed": false
+  },
+  "capability_summary": [
+    "MCP 工具调用",
+    "Workspace 存储",
+    "审计记录"
+  ],
+  "addon_capabilities": [
+    "mcp_tools",
+    "workspace",
+    "audit"
+  ],
+  "required_capabilities": [
+    "audit",
+    "workspace"
+  ],
+  "disabled_capabilities": [],
+  "workspace_artifacts_expected": [
+    "react::final",
+    "react::tool_calls"
+  ],
+  "approval_required": false,
+  "async_required": false,
+  "candidates": [],
+  "rejected_modes": [],
+  "score_breakdown": {
+    "direct_answer": 1
+  },
+  "signals": {},
+  "classifier_used": false,
+  "classifier_reason": "",
+  "classifier_confidence": 0.0,
+  "provider": "",
+  "model_used": "small",
+  "mock": false,
+  "fallback_used": false,
+  "audit_url_hint": "http://127.0.0.1:8080/api/v1/tasks/route-1f1d41d1-edee-4bcf-8796-a657954bbfa3/routing-decision"
+}

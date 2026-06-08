@@ -1,0 +1,62 @@
+{
+  "case_id": "fc_rag_local",
+  "task_id": "route-1b408b72-a551-4694-8c95-553b36ef891a",
+  "status": "preview",
+  "planned_mode": "rag_answer",
+  "executed_mode": "rag_answer",
+  "fallback_reason": "",
+  "frontend_explanation": {
+    "selected_mode_human": "知识库检索",
+    "why": "complexity=0.30 risk=medium planned=rag_answer executed=rag_answer score=0.66",
+    "capability_summary": [
+      "本地知识库检索",
+      "引用支持",
+      "Workspace 存储",
+      "审计记录",
+      "沙箱执行"
+    ],
+    "cost_estimate": "约 $0.020，预计 5000 ms",
+    "approval_needed": false
+  },
+  "capability_summary": [
+    "本地知识库检索",
+    "引用支持",
+    "Workspace 存储",
+    "审计记录",
+    "沙箱执行"
+  ],
+  "addon_capabilities": [
+    "rag",
+    "citations",
+    "workspace",
+    "audit",
+    "sandbox"
+  ],
+  "required_capabilities": [
+    "audit",
+    "workspace",
+    "rag",
+    "sandbox"
+  ],
+  "disabled_capabilities": [],
+  "workspace_artifacts_expected": [
+    "rag::final",
+    "rag::citations"
+  ],
+  "approval_required": false,
+  "async_required": false,
+  "candidates": [],
+  "rejected_modes": [],
+  "score_breakdown": {
+    "rag_answer": 1
+  },
+  "signals": {},
+  "classifier_used": false,
+  "classifier_reason": "",
+  "classifier_confidence": 0.0,
+  "provider": "",
+  "model_used": "small",
+  "mock": false,
+  "fallback_used": false,
+  "audit_url_hint": "http://127.0.0.1:8080/api/v1/tasks/route-1b408b72-a551-4694-8c95-553b36ef891a/routing-decision"
+}
