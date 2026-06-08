@@ -154,6 +154,14 @@ type RoutedExecutionResult struct {
 	SolutionRef     string `json:"solution_ref,omitempty"`      // ToT
 	ExplorationRef  string `json:"exploration_tree_ref,omitempty"` // ToT
 	ToTConfidence   float64 `json:"tot_confidence,omitempty"`   // ToT
+
+	// Explanation is the audit-side RouterDecisionExplanation (v2
+	// multi-signal scoring output). Phase 7I P0: threaded through
+	// to the API layer so BuildFrontendContract can surface
+	// classifier metadata (used / reason / confidence / provider /
+	// model / mock). Persisted across Temporal via JSONB
+	// serialization.
+	Explanation *RouterDecisionExplanation `json:"explanation,omitempty"`
 }
 
 const (

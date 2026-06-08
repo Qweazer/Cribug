@@ -122,7 +122,7 @@ func (h *RouteHandler) Route(w http.ResponseWriter, r *http.Request) {
 		WorkflowID:       workflowID,
 		RunID:            runID,
 		Decision:         result.Decision,
-		FrontendContract: BuildFrontendContract(result.Decision, nil),
+		FrontendContract: BuildFrontendContract(result.Decision, result.Explanation),
 		Status:           result.Status,
 	})
 }
@@ -275,7 +275,7 @@ func (h *RouteHandler) ExecuteRouted(w http.ResponseWriter, r *http.Request) {
 		WorkflowID:       workflowID,
 		RunID:            runID,
 		Decision:         result.Decision,
-		FrontendContract: BuildFrontendContract(result.Decision, nil),
+		FrontendContract: BuildFrontendContract(result.Decision, result.Explanation),
 		Status:           result.Status,
 		FinalAnswerText:  result.FinalAnswerText,
 		FinalAnswerRef:   result.FinalAnswerRef,
@@ -450,7 +450,7 @@ func (h *RouteHandler) GetTaskResult(w http.ResponseWriter, r *http.Request) {
 		// anything. The full Explanation (candidates / rejected_modes
 		// / signals) is in the audit row, not the tasks row, so we
 		// only expose the decision-level fields here.
-		resp.FrontendContract = BuildFrontendContract(result.Decision, nil)
+		resp.FrontendContract = BuildFrontendContract(result.Decision, result.Explanation)
 		WriteJSON(w, http.StatusOK, resp)
 		return
 	default:

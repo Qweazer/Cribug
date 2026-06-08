@@ -402,6 +402,21 @@ func (ra *RouterActivities) EvaluateRoutingPolicy(ctx context.Context, input Eva
 		V2PolicyVersion:           expl.PolicyVersion,
 	}
 
+	// ── P0 SAFETY STEP: sandbox_execution MUST require approval ────
+	// Phase 7I P0: explicit safety guarantee, not bypassable.
+	// - sandbox mode selected → approval_required = true
+	// - allow_sandbox=false → executed mode forced to direct_answer
+	if decision.Mode == types.RouteSandboxExecution && !decision.RequiresApproval {
+		decision.RequiresApproval = true
+		decision.Reason += "; p0_safety: sandbox_requires_approval_enforced"
+	}
+	if !input.AllowSandbox && decision.Mode == types.RouteSandboxExecution {
+		decision.Mode = types.RouteDirectAnswer
+		decision.FallbackReason = "p0_safety: sandbox_disallowed_by_user"
+		decision.RequiresApproval = false
+		decision.Reason += "; p0_safety: allow_sandbox=false forced fall back to direct_answer"
+	}
+
 	return &EvaluateRoutingPolicyResult{Decision: decision, Explanation: &expl, Signals: &expl.Signals}, nil
 }
 

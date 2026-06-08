@@ -210,6 +210,9 @@ func AdvancedRoutingWorkflow(ctx workflow.Context, input types.RouteRequest) (*t
 			Decision:   decision,
 			Status:     types.RoutedStatusPreview,
 			CostUSD:    decision.CostBudgetUSD,
+			// P0: thread explanation through so the API layer
+			// can surface classifier metadata to the frontend.
+			Explanation: policyResult.Explanation,
 		}, nil
 	}
 
@@ -218,13 +221,13 @@ func AdvancedRoutingWorkflow(ctx workflow.Context, input types.RouteRequest) (*t
 	// Preview only never reaches here (gated at Step 8.5).
 	if decision.RequiresApproval {
 		result, err := executeWithApprovalGate(ctx, input, decision, workflowID, runID, capabilityResult.DetectedTools)
-		persistRoutedResult(ctx, workflowID, runID, input.SessionID, result, err)
+		persistRoutedResult(ctx, workflowID, runID, input.SessionID, result, err, policyResult.Explanation)
 		return result, err
 	}
 
 	// ── Step 10: Dispatch by mode ────────────────────────────────────
 	result, err := dispatchByMode(ctx, input, decision, workflowID, runID)
-	persistRoutedResult(ctx, workflowID, runID, input.SessionID, result, err)
+	persistRoutedResult(ctx, workflowID, runID, input.SessionID, result, err, policyResult.Explanation)
 	return result, err
 }
 
@@ -235,7 +238,7 @@ func AdvancedRoutingWorkflow(ctx workflow.Context, input types.RouteRequest) (*t
 // Non-fatal: if the persist call fails, we annotate the result with
 // metadata["persist_error"] and continue. The polling API can still
 // answer "failed_with_persist_error" instead of hanging at "running".
-func persistRoutedResult(ctx workflow.Context, workflowID, runID, sessionID string, result *types.RoutedExecutionResult, wfErr error) {
+func persistRoutedResult(ctx workflow.Context, workflowID, runID, sessionID string, result *types.RoutedExecutionResult, wfErr error, explanation *types.RouterDecisionExplanation) {
 	logger := workflow.GetLogger(ctx)
 	status := "completed"
 	errType := ""
@@ -260,6 +263,12 @@ func persistRoutedResult(ctx workflow.Context, workflowID, runID, sessionID stri
 	}
 	if result.Metadata == nil {
 		result.Metadata = map[string]interface{}{}
+	}
+	// P0: thread explanation through so frontend can see classifier
+	// metadata. Only set if not already present (later dispatches
+	// may have already populated it).
+	if result.Explanation == nil && explanation != nil {
+		result.Explanation = explanation
 	}
 	if status == "failed" {
 		result.Metadata["persist_error"] = errMsg

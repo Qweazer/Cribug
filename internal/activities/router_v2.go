@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"log"
 
 	"cribug/internal/config"
 	"cribug/internal/types"
