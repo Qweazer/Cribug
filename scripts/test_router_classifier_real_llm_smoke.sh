@@ -63,6 +63,24 @@ if ! curl -s --max-time 3 "$BASE_URL/health" >/dev/null 2>&1; then
     exit 0
 fi
 
+# Phase7I P1A: probe whether the LLM service is reachable AND
+# exposes /v1/chat/completions. If404 or unreachable, we KNOW real
+# LLM will fail and only mock fallback will run. We record this so
+# the report can honestly say "mock fallback engaged".
+LLM_AVAILABLE=0
+PROBE_LLM_URL="http://127.0.0.1:8000"
+PROBE_STATUS=$(curl -s -o /dev/null -m5 -w '%{http_code}' \
+ -X POST "$PROBE_LLM_URL/v1/chat/completions" \
+ -H "Content-Type: application/json" \
+ -d '{"model":"probe","messages":[{"role":"user","content":"ping"}]}' || echo "000")
+if [ "$PROBE_STATUS" = "200" ]; then
+ LLM_AVAILABLE=1
+ echo "LLM probe:200 OK (real LLM endpoint responsive)"
+else
+ LLM_AVAILABLE=0
+ echo "LLM probe: HTTP=$PROBE_STATUS (real LLM endpoint not responsive — mock fallback will engage)"
+fi
+
 echo "=== Phase 7I Router Classifier real-LLM smoke ==="
 echo "Env: ROUTER_CLASSIFIER_ENABLED=$ROUTER_CLASSIFIER_ENABLED REAL_ROUTER_CLASSIFIER_TEST=$REAL_ROUTER_CLASSIFIER_TEST"
 echo "LLM base: ${LLM_BASE_URL:-${LLM_SERVICE_URL:-default}}"
@@ -124,7 +142,24 @@ fi
 if [ -n "$PROVIDER" ] && [ "$PROVIDER" != "unknown" ]; then
     log_pass "C1.4 provider/model hint present: $PROVIDER"
 else
-    log_skip "C1.4 provider/model hint not surfaced (acceptable for real-LLM mock fallback)"
+ log_fail "C1.4 provider/model hint not surfaced"
+fi
+# Phase7I P1A: explicit honest check on whether the real LLM was hit
+# vs mock fallback engaged.
+if [ "$MOCK_FLAG" = "true" ] || [ "$PROVIDER" = "deterministic_mock" ]; then
+ echo " --- honest report ---"
+ echo " contract.mock=$MOCK_FLAG provider=$PROVIDER confidence=$CONFIDENCE fallback_used=$FALLBACK_USED"
+ if [ "$LLM_AVAILABLE" -eq 1 ]; then
+ log_fail "C1.5 mock fallback engaged despite real LLM probe = OK"
+ else
+ log_pass "C1.5 mock fallback engaged: real LLM endpoint was not reachable at probe (expected)"
+ fi
+else
+ if [ "$LLM_AVAILABLE" -eq 1 ]; then
+ log_pass "C1.5 real LLM path engaged: provider=$PROVIDER mock=$MOCK_FLAG"
+ else
+ log_fail "C1.5 expected mock fallback (LLM probe failed) but router reports mock=$MOCK_FLAG provider=$PROVIDER"
+ fi
 fi
 
 # ─── Case 2: clear-winner (1+1) — classifier MUST NOT be invoked
@@ -148,23 +183,42 @@ else
     log_fail "C2.1 classifier_used expected false on clear winner, got $CLF_USED (mode=$MODE)"
 fi
 
-# ─── Case 3: classifier activity invoked (worker log scan)
+# ─── Case3: classifier path actually invoked (response body check) ───
+# Phase7I P1A: instead of grepping the worker log for the substring
+# "LLMClassifierActivity" (which only appears for Temporal-registered
+# activities, and the classifier runs as an in-process Go function in
+# applyClassifier -> LLMClassifierActivity), we verify the response
+# itself shows classifier engagement.
 echo ""
-echo "--- Case 3: classifier activity invoked (worker log scan) ---"
-WORKER_LOG="/tmp/cribug-worker.log"
-if [ -f "$WORKER_LOG" ]; then
-    HITS=$(tail -n "$LOG_TAIL" "$WORKER_LOG" | grep -c "LLMClassifierActivity" || true)
-    if [ "$HITS" -gt 0 ]; then
-        log_pass "C3.1 LLMClassifierActivity mentioned in worker log ($HITS hits)"
-    else
-        log_fail "C3.1 LLMClassifierActivity not seen in worker log — classifier not invoked"
-    fi
-    # Print the most recent classifier log excerpt for the report.
-    echo "  --- last classifier log lines ---"
-    tail -n "$LOG_TAIL" "$WORKER_LOG" | grep -E "LLMClassifier|classifier" | tail -5 | sed 's/^/    /'
+echo "--- Case3: classifier path actually invoked (response body check) ---"
+RESP=$(api POST "/api/v1/tasks/route" '{
+ "query": "我要做一个 Agent项目的最终上线检查，请把任务拆成后端、路由、RAG、Sandbox、前端联调几个部分，并安排执行顺序。",
+ "budget_usd":0.5,
+ "max_latency_ms":90000,
+ "allow_tools": true,
+ "allow_sandbox": true,
+ "allow_research": true
+}') 
+CLF_REASON=$(echo "$RESP" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+fc=d.get("frontend_contract",{})
+print(fc.get("classifier_reason",""))
+"2>/dev/null || echo "")
+REASON_CODES=$(echo "$RESP" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+fc=d.get("frontend_contract",{})
+rc=fc.get("reason_codes",[])
+trigger_codes=[c for c in rc if c.startswith("classifier_trigger_")]
+print(",".join(trigger_codes))
+"2>/dev/null || echo "")
+if [ -n "$CLF_REASON"] || [ -n "$REASON_CODES" ]; then
+ log_pass "C3.1 response body shows classifier engagement (reason=$CLF_REASON trigger_codes=$REASON_CODES)"
 else
-    log_skip "C3.1 worker log not found at $WORKER_LOG"
+ log_fail "C3.1 response body shows NO classifier engagement (classifier did not run)"
 fi
+
 
 # ─── Case 4: verify classifier metadata in audit row (DB sanity)
 echo ""
@@ -174,12 +228,12 @@ if command -v psql >/dev/null 2>&1; then
         HAS_CMF=$(psql "$DATABASE_URL" -t -A -c "
             SELECT count(*) FROM routing_audit_logs
             WHERE created_at > NOW() - INTERVAL '5 minutes'
-              AND explanation_json ? 'ClassifierMetadata'
+              AND explanation_json ? 'classifier_metadata'
         " 2>/dev/null || echo "0")
         if [ "$HAS_CMF" -gt 0 ] 2>/dev/null; then
-            log_pass "C4.1 audit row has ClassifierMetadata ($HAS_CMF rows)"
+            log_pass "C4.1 audit row has classifier_metadata ($HAS_CMF rows)"
         else
-            log_skip "C4.1 no ClassifierMetadata in recent audit rows (classifier path may not have run yet)"
+            log_skip "C4.1 no classifier_metadata in recent audit rows (classifier path may not have run yet)"
         fi
     else
         log_skip "C4.1 DATABASE_URL not set; cannot query audit"
@@ -187,6 +241,18 @@ if command -v psql >/dev/null 2>&1; then
 else
     log_skip "C4.1 psql not installed"
 fi
+
+echo ""
+echo "=== Honest summary ==="
+if [ "$LLM_AVAILABLE" -eq 1 ]; then
+ echo "Real LLM endpoint was reachable at probe time."
+ echo "If mock fallback was engaged, classifier plumbing is broken."
+else
+ echo "Real LLM endpoint was NOT reachable at probe time (HTTP=$PROBE_STATUS)."
+ echo "Mock fallback engaged is EXPECTED — the classifier plumbing itself is still verified by C1.1/C1.2/C1.3/C1.4/C3.1/C4.1."
+ echo "Real-LLM classifier is NOT fully verified end-to-end in this run."
+fi
+
 
 echo ""
 echo "=== Results ==="

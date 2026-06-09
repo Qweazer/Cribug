@@ -3,6 +3,7 @@ package activities
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,6 +24,15 @@ type LLMCaller func(ctx context.Context, prompt string, model string, maxTokens 
 // ClassifierLLMCaller is the LLM caller used specifically by the
 // classifier path. Defaults to the RouterActivities' LLMCaller.
 var ClassifierLLMCaller LLMCaller
+
+// ErrMockFallbackEngaged is the sentinel returned by
+// defaultClassifierLLMCaller when the real LLM service call fails
+// (HTTP error, timeout, missing endpoint) or no LLM URL is configured
+// at all. LLMClassifierActivity detects this and runs the
+// deterministic mock path itself while preserving Fallback=true so
+// the frontend contract correctly reports mock=true /
+// fallback_used=true.
+var ErrMockFallbackEngaged = errors.New("classifier_llm_fallback_engaged")
 
 // LLMClassifierActivity is the v3 Section 14 LLM-assisted Router
 // Arbiter. It is a secondary-arbiter that re-ranks heuristic candidates
@@ -96,6 +106,35 @@ func (ra *RouterActivities) LLMClassifierActivity(ctx context.Context, input typ
 	}
 	out.TokensUsed = tokens
 
+	// Phase7I P1A: when the caller signals ErrMockFallbackEngaged, run
+	// the deterministic mock path explicitly so the Activity can
+	// surface Fallback=true (and an explicit error_reason) on the
+	// frontend contract. Without this branch the caller used to
+	// silently substitute a mock answer with err=nil, which made the
+	// Activity think a real LLM was invoked.
+	if errors.Is(callErr, ErrMockFallbackEngaged) {
+		out.Fallback = true
+		out.ErrorReason = "real_llm_unavailable_using_mock_fallback"
+		mockAnswer := buildDeterministicMockClassifierAnswer(prompt)
+		out.ModelUsed = cfg.ModelTier + "(mock)"
+		out.TokensUsed = len(mockAnswer) /4
+		var mockParsed struct {
+			Scores map[string]float64 `json:"scores"`
+			Reasoning string `json:"reasoning"`
+			Confidence float64 `json:"confidence"`
+			SelectedMode string `json:"selected_mode"`
+		}
+		if err := json.Unmarshal([]byte(mockAnswer), &mockParsed); err == nil {
+			out.Scores = mockParsed.Scores
+			out.Reasoning = mockParsed.Reasoning
+			out.Confidence = mockParsed.Confidence
+			out.SelectedMode = mockParsed.SelectedMode
+			// KEEP out.Fallback=true so the contract reports mock=true /
+			// fallback_used=true. out.ErrorReason above already explains
+			// the real LLM was unavailable.
+		}
+		return out, nil
+	}
 	if callErr != nil {
 		out.ErrorReason = "llm_call_error: " + callErr.Error()
 		return out, nil
@@ -131,9 +170,15 @@ func (ra *RouterActivities) LLMClassifierActivity(ctx context.Context, input typ
 // defaultClassifierLLMCaller returns a caller that actually invokes
 // the LLM service when the RouterActivities was wired with a service
 // URL (NewRouterActivitiesWithLLM). When the URL is empty — e.g. unit
-// tests or dev environments without an LLM service — the caller falls
-// back to a deterministic mock answer so the classifier can still
-// produce a valid response and the merge path can run.
+// tests or dev environments without an LLM service — the caller
+// signals ErrMockFallbackEngaged instead of silently substituting a
+// mock answer. This lets LLMClassifierActivity keep out.Fallback=true
+// and surface an explicit error_reason / mock=true /
+// fallback_used=true on the frontend contract.
+//
+// Phase7I P1A: the previous version returned a mock answer with
+// err=nil, which caused the Activity to set out.Fallback=false and
+// misled the frontend into thinking a real LLM was invoked.
 func defaultClassifierLLMCaller(ra *RouterActivities) LLMCaller {
 	return func(ctx context.Context, prompt, model string, maxTokens int) (string, string, int, error) {
 		if ra != nil && ra.llmServiceURL != "" {
@@ -141,12 +186,12 @@ func defaultClassifierLLMCaller(ra *RouterActivities) LLMCaller {
 			if err == nil {
 				return answer, modelUsed, tokens, nil
 			}
-			// Real LLM call failed — fall through to mock so the
-			// classifier can still produce something. The Activity
-			// records the error reason in ClassifierMetadata.
+			// Real LLM call failed. Signal the Activity so it can run
+			// the mock path explicitly while keeping Fallback=true.
+			return "", "",0, ErrMockFallbackEngaged
 		}
-		// Mock fallback for dev / unit tests / dev no-LLM mode.
-		return buildDeterministicMockClassifierAnswer(prompt), model, len(prompt) / 4, nil
+		// No LLM service URL configured (dev / unit test). Same path.
+		return "", "",0, ErrMockFallbackEngaged
 	}
 }
 
@@ -392,11 +437,19 @@ func checkClassifierConditions(signals types.RouterDecisionSignals, candidates [
 		}
 	}
 
-	// C7: 3+ advanced modes are candidates simultaneously.
+	// C7:3+ advanced modes are candidates simultaneously WITH
+	// non-trivial scores. Phase7I P1A: the previous version counted
+	// any non-rejected advanced mode, which fired on trivial queries
+	// like "1+1 = ?" where every advanced mode has Score=0 and is
+	// only listed as a candidate to keep the menu non-empty.
+	// Require Score >=0.3 to call something a real contender.
 	if cfg.InvokeOnMultiAdvanced {
-		advanced := 0
+		advanced :=0
 		for _, c := range candidates {
 			if c.Rejected {
+				continue
+			}
+			if c.Score <0.3 {
 				continue
 			}
 			switch c.Mode {
@@ -404,11 +457,10 @@ func checkClassifierConditions(signals types.RouterDecisionSignals, candidates [
 				advanced++
 			}
 		}
-		if advanced >= 3 {
+		if advanced >=3 {
 			return "C7"
 		}
 	}
-
 	// C9 (Phase 7I Fix-2): suspicious direct_clear_winner. When the
 	// heuristic picked direct_answer (a clear winner) but the query
 	// carries semantic complexity signals (Chinese intent words /

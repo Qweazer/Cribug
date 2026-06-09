@@ -741,8 +741,15 @@ func applyClassifier(ctx context.Context, input EvaluateRoutingPolicyInput, sign
 		audit.RawScores = out.Scores
 	}
 	expl.ClassifierMetadata = &audit
-	signals.ClassifierUsed = !out.Fallback
+	// Phase7I P1A: ClassifierUsed now means "classifier path was
+	// attempted" (a trigger condition fired). It does NOT mean
+	// "real LLM was successfully reached" — that information lives
+	// in contract.fallback_used / contract.mock / contract.provider.
+	// Previously this was !out.Fallback which conflated the two
+	// semantics and made the frontend contract misleading on mock fallback.
+	signals.ClassifierUsed = true
 	expl.Signals.ClassifierUsed = signals.ClassifierUsed
+
 
 	// v3 sandbox safety: the LLM MUST NOT downgrade a sandbox
 	// selection. If the heuristic selected sandbox_execution and the
