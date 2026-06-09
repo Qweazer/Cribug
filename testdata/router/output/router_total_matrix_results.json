@@ -6,7 +6,13 @@
     "executed_mode": "direct_answer",
     "classifier_used": false,
     "classifier_reason": "",
-    "reason_codes": [],
+    "reason_codes": [
+      "mode_direct_answer",
+      "rejected_research_v2:latency_exceeds_max",
+      "rejected_tree_of_thoughts:latency_exceeds_max",
+      "rejected_debate:latency_exceeds_max",
+      "rejected_swarm_workflow:latency_exceeds_max"
+    ],
     "provider": "",
     "model_used": "small",
     "mock": false,
@@ -19,14 +25,195 @@
       "audit"
     ],
     "disabled_capabilities": [],
-    "rejected_modes": [],
-    "candidates": [],
+    "rejected_modes": [
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "debate",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "debate",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      }
+    ],
+    "candidates": [
+      {
+        "Mode": "direct_answer",
+        "Score": 0.49,
+        "CostEstimate": 0.005,
+        "LatencyTier": "fast",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "rag_answer",
+        "Score": 0.07,
+        "CostEstimate": 0.02,
+        "LatencyTier": "fast",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "rag",
+          "citations",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "react_tool",
+        "Score": 0.06,
+        "CostEstimate": 0.03,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "research_v2",
+        "Score": 0,
+        "CostEstimate": 0.2,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "latency_exceeds_max",
+        "SuggestedAddons": [
+          "rag",
+          "citations",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "reflection",
+        "Score": 0,
+        "CostEstimate": 0.06,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "tree_of_thoughts",
+        "Score": 0,
+        "CostEstimate": 0.18,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "latency_exceeds_max",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "debate",
+        "Score": 0,
+        "CostEstimate": 0.12,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "latency_exceeds_max",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "dag_workflow",
+        "Score": 0,
+        "CostEstimate": 0.08,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "swarm_workflow",
+        "Score": 0,
+        "CostEstimate": 0.3,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "latency_exceeds_max",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "sandbox_execution",
+        "Score": 0,
+        "CostEstimate": 0.05,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "sandbox",
+          "approval",
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
     "score_breakdown": {
-      "direct_answer": 1
+      "dag_workflow": 0,
+      "debate": 0,
+      "direct_answer": 0.49,
+      "rag_answer": 0.07,
+      "react_tool": 0.06,
+      "reflection": 0,
+      "research_v2": 0,
+      "sandbox_execution": 0,
+      "swarm_workflow": 0,
+      "tree_of_thoughts": 0
     },
     "frontend_explanation": {
       "selected_mode_human": "直接回答",
-      "why": "complexity=0.00 risk=low planned=direct_answer executed=direct_answer score=0.37",
+      "why": "fallback: all candidates rejected",
       "capability_summary": [
         "Workspace 存储",
         "审计记录"
@@ -45,7 +232,13 @@
     "executed_mode": "direct_answer",
     "classifier_used": false,
     "classifier_reason": "",
-    "reason_codes": [],
+    "reason_codes": [
+      "mode_direct_answer",
+      "rejected_research_v2:latency_exceeds_max",
+      "rejected_tree_of_thoughts:latency_exceeds_max",
+      "rejected_debate:latency_exceeds_max",
+      "rejected_swarm_workflow:latency_exceeds_max"
+    ],
     "provider": "",
     "model_used": "small",
     "mock": false,
@@ -58,14 +251,195 @@
       "audit"
     ],
     "disabled_capabilities": [],
-    "rejected_modes": [],
-    "candidates": [],
+    "rejected_modes": [
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "debate",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "debate",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      }
+    ],
+    "candidates": [
+      {
+        "Mode": "direct_answer",
+        "Score": 0.49,
+        "CostEstimate": 0.005,
+        "LatencyTier": "fast",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "rag_answer",
+        "Score": 0.07,
+        "CostEstimate": 0.02,
+        "LatencyTier": "fast",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "rag",
+          "citations",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "react_tool",
+        "Score": 0.06,
+        "CostEstimate": 0.03,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "research_v2",
+        "Score": 0,
+        "CostEstimate": 0.2,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "latency_exceeds_max",
+        "SuggestedAddons": [
+          "rag",
+          "citations",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "reflection",
+        "Score": 0,
+        "CostEstimate": 0.06,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "tree_of_thoughts",
+        "Score": 0,
+        "CostEstimate": 0.18,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "latency_exceeds_max",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "debate",
+        "Score": 0,
+        "CostEstimate": 0.12,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "latency_exceeds_max",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "dag_workflow",
+        "Score": 0,
+        "CostEstimate": 0.08,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "swarm_workflow",
+        "Score": 0,
+        "CostEstimate": 0.3,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "latency_exceeds_max",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "sandbox_execution",
+        "Score": 0,
+        "CostEstimate": 0.05,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "sandbox",
+          "approval",
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
     "score_breakdown": {
-      "direct_answer": 1
+      "dag_workflow": 0,
+      "debate": 0,
+      "direct_answer": 0.49,
+      "rag_answer": 0.07,
+      "react_tool": 0.06,
+      "reflection": 0,
+      "research_v2": 0,
+      "sandbox_execution": 0,
+      "swarm_workflow": 0,
+      "tree_of_thoughts": 0
     },
     "frontend_explanation": {
       "selected_mode_human": "直接回答",
-      "why": "complexity=0.00 risk=low planned=direct_answer executed=direct_answer score=0.37",
+      "why": "fallback: all candidates rejected",
       "capability_summary": [
         "Workspace 存储",
         "审计记录"
@@ -84,7 +458,13 @@
     "executed_mode": "react_tool",
     "classifier_used": false,
     "classifier_reason": "",
-    "reason_codes": [],
+    "reason_codes": [
+      "mode_react_tool",
+      "rejected_research_v2:latency_exceeds_max",
+      "rejected_debate:latency_exceeds_max",
+      "rejected_tree_of_thoughts:latency_exceeds_max",
+      "rejected_swarm_workflow:latency_exceeds_max"
+    ],
     "provider": "",
     "model_used": "small",
     "mock": false,
@@ -98,14 +478,59 @@
       "audit"
     ],
     "disabled_capabilities": [],
-    "rejected_modes": [],
-    "candidates": [],
+    "rejected_modes": [
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "debate",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      }
+    ],
+    "candidates": [
+      {
+        "Mode": "react_tool",
+        "Score": 0.85,
+        "CostEstimate": 0.03,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "direct_answer",
+        "Score": 0.4,
+        "CostEstimate": 0.005,
+        "LatencyTier": "fast",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
     "score_breakdown": {
       "react_tool": 1
     },
     "frontend_explanation": {
       "selected_mode_human": "工具调用",
-      "why": "complexity=0.00 risk=low planned=react_tool executed=react_tool score=0.54",
+      "why": "phase7j: kw react_tool",
       "capability_summary": [
         "MCP 工具调用",
         "Workspace 存储",
@@ -121,42 +546,94 @@
   {
     "case_id": "react_external_tool_intent",
     "name": "ReAct 外部工具调用",
-    "planned_mode": "react_tool",
-    "executed_mode": "direct_answer",
-    "classifier_used": false,
-    "classifier_reason": "",
-    "reason_codes": [],
-    "provider": "",
-    "model_used": "small",
-    "mock": false,
+    "planned_mode": "reflection",
+    "executed_mode": "tree_of_thoughts",
+    "classifier_used": true,
+    "classifier_reason": "semantic_complexity_conflict",
+    "reason_codes": [
+      "classifier_trigger_semantic_complexity_conflict",
+      "mode_reflection",
+      "rejected_tree_of_thoughts:latency_exceeds_max",
+      "rejected_debate:latency_exceeds_max",
+      "rejected_research_v2:latency_exceeds_max",
+      "rejected_swarm_workflow:latency_exceeds_max"
+    ],
+    "provider": "deterministic_mock",
+    "model_used": "small(mock)",
+    "mock": true,
     "fallback_used": false,
     "approval_required": false,
-    "async_required": false,
+    "async_required": true,
     "risk_level": "low",
     "addon_capabilities": [
-      "mcp_tools",
       "workspace",
       "audit"
     ],
     "disabled_capabilities": [],
-    "rejected_modes": [],
-    "candidates": [],
+    "rejected_modes": [
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "debate",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      }
+    ],
+    "candidates": [
+      {
+        "Mode": "reflection",
+        "Score": 0.85,
+        "CostEstimate": 0.06,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "dag_workflow",
+        "Score": 0.4,
+        "CostEstimate": 0.08,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
     "score_breakdown": {
-      "direct_answer": 1
+      "reflection": 1
     },
     "frontend_explanation": {
-      "selected_mode_human": "直接回答",
-      "why": "complexity=0.00 risk=low planned=react_tool executed=direct_answer score=0.28",
+      "selected_mode_human": "反思改进",
+      "why": "phase7j: kw reflection; classifier_fallback=true",
       "capability_summary": [
-        "MCP 工具调用",
         "Workspace 存储",
         "审计记录"
       ],
-      "cost_estimate": "约 $0.030，预计 8000 ms",
+      "cost_estimate": "约 $0.060，预计 30000 ms",
       "approval_needed": false
     },
-    "status": "PASS",
-    "notes": [],
+    "status": "FAIL",
+    "notes": [
+      "planned_mode='reflection' not in ['react_tool']"
+    ],
     "classification_only_note": ""
   },
   {
@@ -164,12 +641,18 @@
     "name": "RAG 本地知识库",
     "planned_mode": "rag_answer",
     "executed_mode": "rag_answer",
-    "classifier_used": false,
-    "classifier_reason": "",
-    "reason_codes": [],
-    "provider": "",
-    "model_used": "small",
-    "mock": false,
+    "classifier_used": true,
+    "classifier_reason": "C5",
+    "reason_codes": [
+      "classifier_trigger_C5",
+      "mode_rag_answer",
+      "rejected_tree_of_thoughts:latency_exceeds_max",
+      "rejected_research_v2:latency_exceeds_max",
+      "rejected_swarm_workflow:latency_exceeds_max"
+    ],
+    "provider": "deterministic_mock",
+    "model_used": "small(mock)",
+    "mock": true,
     "fallback_used": false,
     "approval_required": false,
     "async_required": false,
@@ -182,14 +665,187 @@
       "sandbox"
     ],
     "disabled_capabilities": [],
-    "rejected_modes": [],
-    "candidates": [],
+    "rejected_modes": [
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      }
+    ],
+    "candidates": [
+      {
+        "Mode": "rag_answer",
+        "Score": 0.97,
+        "CostEstimate": 0.02,
+        "LatencyTier": "fast",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "rag",
+          "citations",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "dag_workflow",
+        "Score": 0.5349,
+        "CostEstimate": 0.08,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "sandbox_execution",
+        "Score": 0.45,
+        "CostEstimate": 0.05,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "sandbox",
+          "approval",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "react_tool",
+        "Score": 0.35,
+        "CostEstimate": 0.03,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "reflection",
+        "Score": 0.32,
+        "CostEstimate": 0.06,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "tree_of_thoughts",
+        "Score": 0.26,
+        "CostEstimate": 0.18,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "latency_exceeds_max",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "debate",
+        "Score": 0.2,
+        "CostEstimate": 0.12,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "research_v2",
+        "Score": 0.12,
+        "CostEstimate": 0.2,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "latency_exceeds_max",
+        "SuggestedAddons": [
+          "rag",
+          "citations",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "swarm_workflow",
+        "Score": 0.07,
+        "CostEstimate": 0.3,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "latency_exceeds_max",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "direct_answer",
+        "Score": 0.04,
+        "CostEstimate": 0.005,
+        "LatencyTier": "fast",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
     "score_breakdown": {
-      "rag_answer": 1
+      "dag_workflow": 0.5349,
+      "debate": 0.2,
+      "direct_answer": 0.04,
+      "rag_answer": 0.97,
+      "react_tool": 0.35,
+      "reflection": 0.32,
+      "research_v2": 0.12,
+      "sandbox_execution": 0.45,
+      "swarm_workflow": 0.07,
+      "tree_of_thoughts": 0.26
     },
     "frontend_explanation": {
       "selected_mode_human": "知识库检索",
-      "why": "complexity=0.30 risk=medium planned=rag_answer executed=rag_answer score=0.66",
+      "why": "mode=rag_answer score=0.97; classifier_fallback=true",
       "capability_summary": [
         "本地知识库检索",
         "引用支持",
@@ -207,11 +863,17 @@
   {
     "case_id": "rag_blocked_by_user",
     "name": "RAG 用户禁用",
-    "planned_mode": "rag_answer",
-    "executed_mode": "rag_answer",
+    "planned_mode": "dag_workflow",
+    "executed_mode": "direct_answer",
     "classifier_used": false,
     "classifier_reason": "",
-    "reason_codes": [],
+    "reason_codes": [
+      "mode_dag_workflow",
+      "rejected_tree_of_thoughts:latency_exceeds_max",
+      "rejected_debate:latency_exceeds_max",
+      "rejected_research_v2:latency_exceeds_max",
+      "rejected_swarm_workflow:latency_exceeds_max"
+    ],
     "provider": "",
     "model_used": "small",
     "mock": false,
@@ -220,50 +882,190 @@
     "async_required": false,
     "risk_level": "low",
     "addon_capabilities": [
-      "rag",
-      "citations",
+      "mcp_tools",
       "workspace",
-      "audit"
+      "audit",
+      "rag"
     ],
     "disabled_capabilities": [
       "web_search",
       "mcp_tools"
     ],
-    "rejected_modes": [],
-    "candidates": [],
+    "rejected_modes": [
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "debate",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      }
+    ],
+    "candidates": [
+      {
+        "Mode": "dag_workflow",
+        "Score": 0.85,
+        "CostEstimate": 0.08,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "direct_answer",
+        "Score": 0.4,
+        "CostEstimate": 0.005,
+        "LatencyTier": "fast",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
     "score_breakdown": {
-      "rag_answer": 1
+      "dag_workflow": 1
     },
     "frontend_explanation": {
-      "selected_mode_human": "知识库检索",
-      "why": "complexity=0.25 risk=low planned=rag_answer executed=rag_answer score=0.68",
+      "selected_mode_human": "DAG 多步工作流",
+      "why": "phase7j: kw dag_workflow",
       "capability_summary": [
-        "本地知识库检索",
-        "引用支持",
+        "MCP 工具调用",
         "Workspace 存储",
-        "审计记录"
+        "审计记录",
+        "本地知识库检索"
       ],
-      "cost_estimate": "约 $0.020，预计 5000 ms",
+      "cost_estimate": "约 $0.080，预计 20000 ms",
       "approval_needed": false
     },
     "status": "FAIL",
     "notes": [
-      "executed_mode='rag_answer' not in ['direct_answer']",
-      "disabled missing: ['rag_answer', 'research_v2']"
+      "planned_mode='dag_workflow' not in ['rag_answer', 'research_v2']",
+      "disabled missing: ['rag_answer']"
     ],
     "classification_only_note": ""
   },
   {
     "case_id": "dag_multi_step_pipeline",
     "name": "DAG 多步流水线",
+    "planned_mode": "dag_workflow",
+    "executed_mode": "direct_answer",
+    "classifier_used": true,
+    "classifier_reason": "semantic_complexity_conflict",
+    "reason_codes": [
+      "classifier_trigger_semantic_complexity_conflict",
+      "mode_dag_workflow",
+      "rejected_tree_of_thoughts:latency_exceeds_max",
+      "rejected_research_v2:latency_exceeds_max",
+      "rejected_swarm_workflow:latency_exceeds_max"
+    ],
+    "provider": "deterministic_mock",
+    "model_used": "small(mock)",
+    "mock": true,
+    "fallback_used": false,
+    "approval_required": false,
+    "async_required": false,
+    "risk_level": "medium",
+    "addon_capabilities": [
+      "mcp_tools",
+      "workspace",
+      "audit",
+      "sandbox"
+    ],
+    "disabled_capabilities": [],
+    "rejected_modes": [
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      }
+    ],
+    "candidates": [
+      {
+        "Mode": "dag_workflow",
+        "Score": 0.85,
+        "CostEstimate": 0.08,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "direct_answer",
+        "Score": 0.4,
+        "CostEstimate": 0.005,
+        "LatencyTier": "fast",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
+    "score_breakdown": {
+      "dag_workflow": 1
+    },
+    "frontend_explanation": {
+      "selected_mode_human": "DAG 多步工作流",
+      "why": "phase7j: kw dag_workflow; classifier_fallback=true",
+      "capability_summary": [
+        "MCP 工具调用",
+        "Workspace 存储",
+        "审计记录",
+        "沙箱执行"
+      ],
+      "cost_estimate": "约 $0.080，预计 20000 ms",
+      "approval_needed": false
+    },
+    "status": "PASS",
+    "notes": [],
+    "classification_only_note": ""
+  },
+  {
+    "case_id": "dag_or_swarm_ambiguous",
+    "name": "DAG vs Swarm 歧义（classifier 必触发）",
     "planned_mode": "reflection",
     "executed_mode": "tree_of_thoughts",
-    "classifier_used": false,
-    "classifier_reason": "",
-    "reason_codes": [],
-    "provider": "",
-    "model_used": "medium",
-    "mock": false,
+    "classifier_used": true,
+    "classifier_reason": "semantic_complexity_conflict",
+    "reason_codes": [
+      "classifier_trigger_semantic_complexity_conflict",
+      "mode_reflection",
+      "rejected_research_v2:latency_exceeds_max",
+      "rejected_swarm_workflow:latency_exceeds_max"
+    ],
+    "provider": "deterministic_mock",
+    "model_used": "small(mock)",
+    "mock": true,
     "fallback_used": false,
     "approval_required": false,
     "async_required": true,
@@ -274,14 +1076,51 @@
       "sandbox"
     ],
     "disabled_capabilities": [],
-    "rejected_modes": [],
-    "candidates": [],
+    "rejected_modes": [
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      }
+    ],
+    "candidates": [
+      {
+        "Mode": "reflection",
+        "Score": 0.85,
+        "CostEstimate": 0.06,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "dag_workflow",
+        "Score": 0.4,
+        "CostEstimate": 0.08,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
     "score_breakdown": {
-      "tree_of_thoughts": 1
+      "reflection": 1
     },
     "frontend_explanation": {
-      "selected_mode_human": "多路径探索",
-      "why": "complexity=0.45 risk=medium planned=reflection executed=tree_of_thoughts score=0.68",
+      "selected_mode_human": "反思改进",
+      "why": "phase7j: kw reflection; classifier_fallback=true",
       "capability_summary": [
         "Workspace 存储",
         "审计记录",
@@ -290,55 +1129,10 @@
       "cost_estimate": "约 $0.060，预计 30000 ms",
       "approval_needed": false
     },
-    "status": "PASS",
-    "notes": [],
-    "classification_only_note": ""
-  },
-  {
-    "case_id": "dag_or_swarm_ambiguous",
-    "name": "DAG vs Swarm 歧义（classifier 必触发）",
-    "planned_mode": "sandbox_execution",
-    "executed_mode": "sandbox_execution",
-    "classifier_used": false,
-    "classifier_reason": "",
-    "reason_codes": [],
-    "provider": "",
-    "model_used": "small",
-    "mock": false,
-    "fallback_used": false,
-    "approval_required": false,
-    "async_required": true,
-    "risk_level": "medium",
-    "addon_capabilities": [
-      "sandbox",
-      "approval",
-      "workspace",
-      "audit"
-    ],
-    "disabled_capabilities": [],
-    "rejected_modes": [],
-    "candidates": [],
-    "score_breakdown": {
-      "sandbox_execution": 1
-    },
-    "frontend_explanation": {
-      "selected_mode_human": "沙箱代码执行",
-      "why": "complexity=0.40 risk=medium planned=sandbox_execution executed=sandbox_execution score=0.58",
-      "capability_summary": [
-        "沙箱执行",
-        "等待人工审批",
-        "Workspace 存储",
-        "审计记录"
-      ],
-      "cost_estimate": "约 $0.050，预计 30000 ms",
-      "approval_needed": false
-    },
     "status": "FAIL",
     "notes": [
-      "planned_mode='sandbox_execution' not in ['dag_workflow', 'swarm_workflow']",
-      "candidates missing: ['dag_workflow', 'swarm_workflow']",
-      "classifier_expected=true but classifier_used=false",
-      "sandbox_execution planned but approval_required=false"
+      "planned_mode='reflection' not in ['dag_workflow', 'swarm_workflow']",
+      "candidates missing: ['swarm_workflow']"
     ],
     "classification_only_note": ""
   },
@@ -347,12 +1141,18 @@
     "name": "Reflection 改进计划",
     "planned_mode": "reflection",
     "executed_mode": "tree_of_thoughts",
-    "classifier_used": false,
-    "classifier_reason": "",
-    "reason_codes": [],
-    "provider": "",
-    "model_used": "small",
-    "mock": false,
+    "classifier_used": true,
+    "classifier_reason": "advanced_intent_under_direct_answer",
+    "reason_codes": [
+      "classifier_trigger_advanced_intent_under_direct_answer",
+      "mode_reflection",
+      "rejected_tree_of_thoughts:latency_exceeds_max",
+      "rejected_research_v2:latency_exceeds_max",
+      "rejected_swarm_workflow:latency_exceeds_max"
+    ],
+    "provider": "deterministic_mock",
+    "model_used": "small(mock)",
+    "mock": true,
     "fallback_used": false,
     "approval_required": false,
     "async_required": true,
@@ -362,14 +1162,55 @@
       "audit"
     ],
     "disabled_capabilities": [],
-    "rejected_modes": [],
-    "candidates": [],
+    "rejected_modes": [
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      }
+    ],
+    "candidates": [
+      {
+        "Mode": "reflection",
+        "Score": 0.85,
+        "CostEstimate": 0.06,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "dag_workflow",
+        "Score": 0.4,
+        "CostEstimate": 0.08,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
     "score_breakdown": {
-      "tree_of_thoughts": 1
+      "reflection": 1
     },
     "frontend_explanation": {
-      "selected_mode_human": "多路径探索",
-      "why": "complexity=0.35 risk=medium planned=reflection executed=tree_of_thoughts score=0.39",
+      "selected_mode_human": "反思改进",
+      "why": "phase7j: kw reflection; classifier_fallback=true",
       "capability_summary": [
         "Workspace 存储",
         "审计记录"
@@ -388,7 +1229,18 @@
     "executed_mode": "tree_of_thoughts",
     "classifier_used": false,
     "classifier_reason": "",
-    "reason_codes": [],
+    "reason_codes": [
+      "mode_reflection",
+      "rejected_react_tool:cost_exceeds_budget",
+      "rejected_rag_answer:cost_exceeds_budget",
+      "rejected_research_v2:latency_exceeds_max",
+      "rejected_reflection:cost_exceeds_budget",
+      "rejected_tree_of_thoughts:latency_exceeds_max",
+      "rejected_debate:latency_exceeds_max",
+      "rejected_dag_workflow:cost_exceeds_budget",
+      "rejected_swarm_workflow:latency_exceeds_max",
+      "rejected_sandbox_execution:cost_exceeds_budget"
+    ],
     "provider": "",
     "model_used": "small",
     "mock": false,
@@ -401,14 +1253,79 @@
       "audit"
     ],
     "disabled_capabilities": [],
-    "rejected_modes": [],
-    "candidates": [],
+    "rejected_modes": [
+      {
+        "mode": "react_tool",
+        "reason": "cost_exceeds_budget"
+      },
+      {
+        "mode": "rag_answer",
+        "reason": "cost_exceeds_budget"
+      },
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "reflection",
+        "reason": "cost_exceeds_budget"
+      },
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "debate",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "dag_workflow",
+        "reason": "cost_exceeds_budget"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "sandbox_execution",
+        "reason": "cost_exceeds_budget"
+      }
+    ],
+    "candidates": [
+      {
+        "Mode": "reflection",
+        "Score": 0.85,
+        "CostEstimate": 0.06,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "dag_workflow",
+        "Score": 0.4,
+        "CostEstimate": 0.08,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
     "score_breakdown": {
-      "tree_of_thoughts": 1
+      "reflection": 1
     },
     "frontend_explanation": {
-      "selected_mode_human": "多路径探索",
-      "why": "complexity=0.40 risk=medium planned=reflection executed=tree_of_thoughts score=0.23",
+      "selected_mode_human": "反思改进",
+      "why": "phase7j: kw reflection",
       "capability_summary": [
         "Workspace 存储",
         "审计记录"
@@ -416,23 +1333,25 @@
       "cost_estimate": "约 $0.060，预计 30000 ms",
       "approval_needed": false
     },
-    "status": "FAIL",
-    "notes": [
-      "rejected reasons missing: ['cost_exceeds_budget', 'latency_exceeds_max']"
-    ],
+    "status": "PASS",
+    "notes": [],
     "classification_only_note": ""
   },
   {
     "case_id": "tot_multi_path_architecture",
     "name": "ToT 多路径架构",
-    "planned_mode": "reflection",
-    "executed_mode": "tree_of_thoughts",
-    "classifier_used": false,
-    "classifier_reason": "",
-    "reason_codes": [],
-    "provider": "",
-    "model_used": "medium",
-    "mock": false,
+    "planned_mode": "tree_of_thoughts",
+    "executed_mode": "reflection",
+    "classifier_used": true,
+    "classifier_reason": "semantic_complexity_conflict",
+    "reason_codes": [
+      "classifier_trigger_semantic_complexity_conflict",
+      "mode_tree_of_thoughts",
+      "rejected_swarm_workflow:latency_exceeds_max"
+    ],
+    "provider": "deterministic_mock",
+    "model_used": "small(mock)",
+    "mock": true,
     "fallback_used": false,
     "approval_required": false,
     "async_required": true,
@@ -442,157 +1361,307 @@
       "audit"
     ],
     "disabled_capabilities": [],
-    "rejected_modes": [],
-    "candidates": [],
+    "rejected_modes": [
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      }
+    ],
+    "candidates": [
+      {
+        "Mode": "tree_of_thoughts",
+        "Score": 0.85,
+        "CostEstimate": 0.18,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "reflection",
+        "Score": 0.4,
+        "CostEstimate": 0.06,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
     "score_breakdown": {
       "tree_of_thoughts": 1
     },
     "frontend_explanation": {
       "selected_mode_human": "多路径探索",
-      "why": "complexity=0.50 risk=medium planned=reflection executed=tree_of_thoughts score=0.42",
+      "why": "phase7j: kw tree_of_thoughts; classifier_fallback=true",
       "capability_summary": [
         "Workspace 存储",
         "审计记录"
       ],
-      "cost_estimate": "约 $0.060，预计 30000 ms",
+      "cost_estimate": "约 $0.180，预计 90000 ms",
       "approval_needed": false
     },
-    "status": "FAIL",
-    "notes": [
-      "classifier_expected=true but classifier_used=false"
-    ],
+    "status": "PASS",
+    "notes": [],
     "classification_only_note": ""
   },
   {
     "case_id": "tot_latency_blocked",
     "name": "ToT 延迟阻塞",
-    "planned_mode": "react_tool",
-    "executed_mode": "direct_answer",
+    "planned_mode": "tree_of_thoughts",
+    "executed_mode": "reflection",
     "classifier_used": false,
     "classifier_reason": "",
-    "reason_codes": [],
+    "reason_codes": [
+      "mode_tree_of_thoughts",
+      "rejected_tree_of_thoughts:latency_exceeds_max",
+      "rejected_debate:latency_exceeds_max",
+      "rejected_research_v2:latency_exceeds_max",
+      "rejected_swarm_workflow:latency_exceeds_max"
+    ],
     "provider": "",
     "model_used": "small",
     "mock": false,
     "fallback_used": false,
     "approval_required": false,
-    "async_required": false,
+    "async_required": true,
     "risk_level": "low",
     "addon_capabilities": [
-      "mcp_tools",
       "workspace",
       "audit"
     ],
     "disabled_capabilities": [],
-    "rejected_modes": [],
-    "candidates": [],
+    "rejected_modes": [
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "debate",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      }
+    ],
+    "candidates": [
+      {
+        "Mode": "tree_of_thoughts",
+        "Score": 0.85,
+        "CostEstimate": 0.18,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "reflection",
+        "Score": 0.4,
+        "CostEstimate": 0.06,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
     "score_breakdown": {
-      "direct_answer": 1
+      "tree_of_thoughts": 1
     },
     "frontend_explanation": {
-      "selected_mode_human": "直接回答",
-      "why": "complexity=0.15 risk=low planned=react_tool executed=direct_answer score=0.31",
+      "selected_mode_human": "多路径探索",
+      "why": "phase7j: kw tree_of_thoughts",
       "capability_summary": [
-        "MCP 工具调用",
         "Workspace 存储",
         "审计记录"
       ],
-      "cost_estimate": "约 $0.030，预计 8000 ms",
+      "cost_estimate": "约 $0.180，预计 90000 ms",
       "approval_needed": false
     },
-    "status": "FAIL",
-    "notes": [
-      "rejected reasons missing: ['latency_exceeds_max']"
-    ],
+    "status": "PASS",
+    "notes": [],
     "classification_only_note": ""
   },
   {
     "case_id": "debate_pro_con",
     "name": "Debate 正反观点",
-    "planned_mode": "react_tool",
-    "executed_mode": "direct_answer",
-    "classifier_used": false,
-    "classifier_reason": "",
-    "reason_codes": [],
-    "provider": "",
-    "model_used": "small",
-    "mock": false,
+    "planned_mode": "debate",
+    "executed_mode": "reflection",
+    "classifier_used": true,
+    "classifier_reason": "advanced_intent_under_direct_answer",
+    "reason_codes": [
+      "classifier_trigger_advanced_intent_under_direct_answer",
+      "mode_debate",
+      "rejected_tree_of_thoughts:latency_exceeds_max",
+      "rejected_research_v2:latency_exceeds_max",
+      "rejected_swarm_workflow:latency_exceeds_max"
+    ],
+    "provider": "deterministic_mock",
+    "model_used": "MiniMax-M2.7",
+    "mock": true,
     "fallback_used": false,
     "approval_required": false,
-    "async_required": false,
+    "async_required": true,
     "risk_level": "low",
     "addon_capabilities": [
-      "mcp_tools",
       "workspace",
       "audit"
     ],
     "disabled_capabilities": [],
-    "rejected_modes": [],
-    "candidates": [],
+    "rejected_modes": [
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      }
+    ],
+    "candidates": [
+      {
+        "Mode": "debate",
+        "Score": 0.85,
+        "CostEstimate": 0.12,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "tree_of_thoughts",
+        "Score": 0.4,
+        "CostEstimate": 0.18,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
     "score_breakdown": {
-      "direct_answer": 1
+      "debate": 1
     },
     "frontend_explanation": {
-      "selected_mode_human": "直接回答",
-      "why": "complexity=0.10 risk=low planned=react_tool executed=direct_answer score=0.27",
+      "selected_mode_human": "正反观点对比",
+      "why": "phase7j: kw debate; classifier_fallback=true",
       "capability_summary": [
-        "MCP 工具调用",
         "Workspace 存储",
         "审计记录"
       ],
-      "cost_estimate": "约 $0.030，预计 8000 ms",
+      "cost_estimate": "约 $0.120，预计 60000 ms",
       "approval_needed": false
     },
-    "status": "FAIL",
-    "notes": [
-      "planned_mode='react_tool' not in ['debate', 'tree_of_thoughts']",
-      "classifier_expected=true but classifier_used=false"
-    ],
+    "status": "PASS",
+    "notes": [],
     "classification_only_note": ""
   },
   {
     "case_id": "debate_vs_research_ambiguous",
     "name": "Debate vs Research 歧义",
-    "planned_mode": "research_v2",
-    "executed_mode": "research_v1",
-    "classifier_used": false,
-    "classifier_reason": "",
-    "reason_codes": [],
-    "provider": "",
-    "model_used": "medium",
-    "mock": false,
+    "planned_mode": "debate",
+    "executed_mode": "reflection",
+    "classifier_used": true,
+    "classifier_reason": "semantic_complexity_conflict",
+    "reason_codes": [
+      "classifier_trigger_semantic_complexity_conflict",
+      "mode_debate",
+      "rejected_swarm_workflow:latency_exceeds_max"
+    ],
+    "provider": "deterministic_mock",
+    "model_used": "small(mock)",
+    "mock": true,
     "fallback_used": false,
     "approval_required": false,
     "async_required": true,
     "risk_level": "medium",
     "addon_capabilities": [
-      "rag",
-      "citations",
       "workspace",
-      "audit"
+      "audit",
+      "citations"
     ],
     "disabled_capabilities": [],
-    "rejected_modes": [],
-    "candidates": [],
+    "rejected_modes": [
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      }
+    ],
+    "candidates": [
+      {
+        "Mode": "debate",
+        "Score": 0.85,
+        "CostEstimate": 0.12,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "tree_of_thoughts",
+        "Score": 0.4,
+        "CostEstimate": 0.18,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
     "score_breakdown": {
-      "research_v1": 1
+      "debate": 1
     },
     "frontend_explanation": {
-      "selected_mode_human": "research_v1",
-      "why": "complexity=0.50 risk=medium planned=research_v2 executed=research_v1 score=0.68",
+      "selected_mode_human": "正反观点对比",
+      "why": "phase7j: kw debate; classifier_fallback=true",
       "capability_summary": [
-        "本地知识库检索",
-        "引用支持",
         "Workspace 存储",
-        "审计记录"
+        "审计记录",
+        "引用支持"
       ],
-      "cost_estimate": "约 $0.200，预计 120000 ms",
+      "cost_estimate": "约 $0.120，预计 60000 ms",
       "approval_needed": false
     },
     "status": "FAIL",
     "notes": [
-      "candidates missing: ['debate', 'research_v2']",
-      "classifier_expected=true but classifier_used=false"
+      "candidates missing: ['research_v2']"
     ],
     "classification_only_note": ""
   },
@@ -601,14 +1670,17 @@
     "name": "Research 引用",
     "planned_mode": "research_v2",
     "executed_mode": "research_v1",
-    "classifier_used": false,
-    "classifier_reason": "",
-    "reason_codes": [],
-    "provider": "",
-    "model_used": "large",
-    "mock": false,
+    "classifier_used": true,
+    "classifier_reason": "C5",
+    "reason_codes": [
+      "classifier_trigger_C5",
+      "mode_research_v2"
+    ],
+    "provider": "deterministic_mock",
+    "model_used": "MiniMax-M2.7",
+    "mock": true,
     "fallback_used": false,
-    "approval_required": false,
+    "approval_required": true,
     "async_required": true,
     "risk_level": "high",
     "addon_capabilities": [
@@ -621,13 +1693,43 @@
     ],
     "disabled_capabilities": [],
     "rejected_modes": [],
-    "candidates": [],
+    "candidates": [
+      {
+        "Mode": "research_v2",
+        "Score": 0.85,
+        "CostEstimate": 0.2,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "rag",
+          "citations",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "dag_workflow",
+        "Score": 0.4,
+        "CostEstimate": 0.08,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
     "score_breakdown": {
-      "research_v1": 1
+      "research_v2": 1
     },
     "frontend_explanation": {
-      "selected_mode_human": "research_v1",
-      "why": "complexity=0.75 risk=high planned=research_v2 executed=research_v1 score=0.68",
+      "selected_mode_human": "研究综合",
+      "why": "phase7j: kw research_v2; classifier_fallback=true",
       "capability_summary": [
         "本地知识库检索",
         "引用支持",
@@ -637,302 +1739,28 @@
         "等待人工审批"
       ],
       "cost_estimate": "约 $0.200，预计 120000 ms",
-      "approval_needed": false
+      "approval_needed": true
     },
-    "status": "FAIL",
-    "notes": [
-      "classifier_expected=true but classifier_used=false"
-    ],
+    "status": "PASS",
+    "notes": [],
     "classification_only_note": ""
   },
   {
     "case_id": "research_blocked",
     "name": "Research 用户禁用",
-    "planned_mode": "react_tool",
-    "executed_mode": "direct_answer",
-    "classifier_used": false,
-    "classifier_reason": "",
-    "reason_codes": [],
-    "provider": "",
-    "model_used": "small",
-    "mock": false,
-    "fallback_used": false,
-    "approval_required": false,
-    "async_required": false,
-    "risk_level": "medium",
-    "addon_capabilities": [
-      "mcp_tools",
-      "workspace",
-      "audit",
-      "citations"
-    ],
-    "disabled_capabilities": [
-      "web_search",
-      "mcp_tools"
-    ],
-    "rejected_modes": [],
-    "candidates": [],
-    "score_breakdown": {
-      "direct_answer": 1
-    },
-    "frontend_explanation": {
-      "selected_mode_human": "直接回答",
-      "why": "complexity=0.30 risk=medium planned=react_tool executed=direct_answer score=0.30",
-      "capability_summary": [
-        "MCP 工具调用",
-        "Workspace 存储",
-        "审计记录",
-        "引用支持"
-      ],
-      "cost_estimate": "约 $0.030，预计 8000 ms",
-      "approval_needed": false
-    },
-    "status": "FAIL",
-    "notes": [
-      "disabled missing: ['research_v2']"
-    ],
-    "classification_only_note": ""
-  },
-  {
-    "case_id": "swarm_multi_agent_team",
-    "name": "Swarm 多 Agent 团队",
-    "planned_mode": "sandbox_execution",
-    "executed_mode": "sandbox_execution",
-    "classifier_used": false,
-    "classifier_reason": "",
-    "reason_codes": [],
-    "provider": "",
-    "model_used": "large",
-    "mock": false,
-    "fallback_used": false,
-    "approval_required": false,
-    "async_required": true,
-    "risk_level": "high",
-    "addon_capabilities": [
-      "sandbox",
-      "approval",
-      "workspace",
-      "audit"
-    ],
-    "disabled_capabilities": [],
-    "rejected_modes": [],
-    "candidates": [],
-    "score_breakdown": {
-      "sandbox_execution": 1
-    },
-    "frontend_explanation": {
-      "selected_mode_human": "沙箱代码执行",
-      "why": "complexity=0.75 risk=high planned=sandbox_execution executed=sandbox_execution score=0.44",
-      "capability_summary": [
-        "沙箱执行",
-        "等待人工审批",
-        "Workspace 存储",
-        "审计记录"
-      ],
-      "cost_estimate": "约 $0.050，预计 30000 ms",
-      "approval_needed": false
-    },
-    "status": "FAIL",
-    "notes": [
-      "planned_mode='sandbox_execution' not in ['dag_workflow', 'debate', 'swarm_workflow']",
-      "classifier_expected=true but classifier_used=false",
-      "sandbox_execution planned but approval_required=false"
-    ],
-    "classification_only_note": "swarm_workflow planning only; execution may fall back if feature off"
-  },
-  {
-    "case_id": "swarm_budget_degrade",
-    "name": "Swarm 预算降级",
-    "planned_mode": "reflection",
-    "executed_mode": "tree_of_thoughts",
-    "classifier_used": false,
-    "classifier_reason": "",
-    "reason_codes": [],
-    "provider": "",
-    "model_used": "small",
-    "mock": false,
-    "fallback_used": false,
-    "approval_required": false,
-    "async_required": true,
-    "risk_level": "medium",
-    "addon_capabilities": [
-      "workspace",
-      "audit"
-    ],
-    "disabled_capabilities": [],
-    "rejected_modes": [],
-    "candidates": [],
-    "score_breakdown": {
-      "tree_of_thoughts": 1
-    },
-    "frontend_explanation": {
-      "selected_mode_human": "多路径探索",
-      "why": "complexity=0.35 risk=medium planned=reflection executed=tree_of_thoughts score=0.23",
-      "capability_summary": [
-        "Workspace 存储",
-        "审计记录"
-      ],
-      "cost_estimate": "约 $0.060，预计 30000 ms",
-      "approval_needed": false
-    },
-    "status": "FAIL",
-    "notes": [
-      "executed_mode='tree_of_thoughts' not in ['dag_workflow', 'direct_answer', 'reflection']",
-      "rejected reasons missing: ['cost_exceeds_budget']"
-    ],
-    "classification_only_note": ""
-  },
-  {
-    "case_id": "sandbox_execute_code",
-    "name": "Sandbox 执行代码",
-    "planned_mode": "sandbox_execution",
-    "executed_mode": "sandbox_execution",
-    "classifier_used": false,
-    "classifier_reason": "",
-    "reason_codes": [],
-    "provider": "",
-    "model_used": "small",
-    "mock": false,
-    "fallback_used": false,
-    "approval_required": false,
-    "async_required": true,
-    "risk_level": "medium",
-    "addon_capabilities": [
-      "sandbox",
-      "approval",
-      "workspace",
-      "audit"
-    ],
-    "disabled_capabilities": [],
-    "rejected_modes": [],
-    "candidates": [],
-    "score_breakdown": {
-      "sandbox_execution": 1
-    },
-    "frontend_explanation": {
-      "selected_mode_human": "沙箱代码执行",
-      "why": "complexity=0.30 risk=medium planned=sandbox_execution executed=sandbox_execution score=0.65",
-      "capability_summary": [
-        "沙箱执行",
-        "等待人工审批",
-        "Workspace 存储",
-        "审计记录"
-      ],
-      "cost_estimate": "约 $0.050，预计 30000 ms",
-      "approval_needed": false
-    },
-    "status": "FAIL",
-    "notes": [
-      "classifier_expected=true but classifier_used=false",
-      "approval_required expected true, got false",
-      "sandbox_execution planned but approval_required=false"
-    ],
-    "classification_only_note": ""
-  },
-  {
-    "case_id": "sandbox_blocked_by_user",
-    "name": "Sandbox 用户禁用",
-    "planned_mode": "react_tool",
-    "executed_mode": "direct_answer",
-    "classifier_used": false,
-    "classifier_reason": "",
-    "reason_codes": [],
-    "provider": "",
-    "model_used": "small",
-    "mock": false,
-    "fallback_used": false,
-    "approval_required": false,
-    "async_required": false,
-    "risk_level": "low",
-    "addon_capabilities": [
-      "mcp_tools",
-      "workspace",
-      "audit",
-      "sandbox"
-    ],
-    "disabled_capabilities": [
-      "sandbox"
-    ],
-    "rejected_modes": [],
-    "candidates": [],
-    "score_breakdown": {
-      "direct_answer": 1
-    },
-    "frontend_explanation": {
-      "selected_mode_human": "直接回答",
-      "why": "complexity=0.20 risk=low planned=react_tool executed=direct_answer score=0.28",
-      "capability_summary": [
-        "MCP 工具调用",
-        "Workspace 存储",
-        "审计记录",
-        "沙箱执行"
-      ],
-      "cost_estimate": "约 $0.030，预计 8000 ms",
-      "approval_needed": false
-    },
-    "status": "FAIL",
-    "notes": [
-      "rejected reasons missing: ['blocked_by_user_allow_flag']"
-    ],
-    "classification_only_note": ""
-  },
-  {
-    "case_id": "sandbox_untrusted_code_risk",
-    "name": "Sandbox 不可信代码风险",
-    "planned_mode": "sandbox_execution",
-    "executed_mode": "sandbox_execution",
-    "classifier_used": false,
-    "classifier_reason": "",
-    "reason_codes": [],
-    "provider": "",
-    "model_used": "small",
-    "mock": false,
-    "fallback_used": false,
-    "approval_required": false,
-    "async_required": true,
-    "risk_level": "medium",
-    "addon_capabilities": [
-      "sandbox",
-      "approval",
-      "workspace",
-      "audit"
-    ],
-    "disabled_capabilities": [],
-    "rejected_modes": [],
-    "candidates": [],
-    "score_breakdown": {
-      "sandbox_execution": 1
-    },
-    "frontend_explanation": {
-      "selected_mode_human": "沙箱代码执行",
-      "why": "complexity=0.30 risk=medium planned=sandbox_execution executed=sandbox_execution score=0.50",
-      "capability_summary": [
-        "沙箱执行",
-        "等待人工审批",
-        "Workspace 存储",
-        "审计记录"
-      ],
-      "cost_estimate": "约 $0.050，预计 30000 ms",
-      "approval_needed": false
-    },
-    "status": "FAIL",
-    "notes": [
-      "approval_required expected true, got false",
-      "risk_level=medium below min=high",
-      "sandbox_execution planned but approval_required=false"
-    ],
-    "classification_only_note": ""
-  },
-  {
-    "case_id": "classifier_dag_vs_tot_vs_research",
-    "name": "3 个高级 mode 冲突",
     "planned_mode": "research_v2",
-    "executed_mode": "research_v1",
+    "executed_mode": "direct_answer",
     "classifier_used": false,
     "classifier_reason": "",
-    "reason_codes": [],
+    "reason_codes": [
+      "mode_research_v2",
+      "rejected_research_v2:blocked_by_user_allow_flag",
+      "rejected_tree_of_thoughts:latency_exceeds_max",
+      "rejected_swarm_workflow:latency_exceeds_max",
+      "rejected_research_v2:blocked_by_user_allow_flag"
+    ],
     "provider": "",
-    "model_used": "medium",
+    "model_used": "small",
     "mock": false,
     "fallback_used": false,
     "approval_required": false,
@@ -944,15 +1772,65 @@
       "workspace",
       "audit"
     ],
-    "disabled_capabilities": [],
-    "rejected_modes": [],
-    "candidates": [],
+    "disabled_capabilities": [
+      "web_search",
+      "mcp_tools"
+    ],
+    "rejected_modes": [
+      {
+        "mode": "research_v2",
+        "reason": "blocked_by_user_allow_flag"
+      },
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "research_v2",
+        "reason": "blocked_by_user_allow_flag"
+      }
+    ],
+    "candidates": [
+      {
+        "Mode": "research_v2",
+        "Score": 0.85,
+        "CostEstimate": 0.2,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "rag",
+          "citations",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "dag_workflow",
+        "Score": 0.4,
+        "CostEstimate": 0.08,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
     "score_breakdown": {
-      "research_v1": 1
+      "research_v2": 1
     },
     "frontend_explanation": {
-      "selected_mode_human": "research_v1",
-      "why": "complexity=0.55 risk=medium planned=research_v2 executed=research_v1 score=0.68",
+      "selected_mode_human": "研究综合",
+      "why": "phase7j: kw research_v2",
       "capability_summary": [
         "本地知识库检索",
         "引用支持",
@@ -962,21 +1840,652 @@
       "cost_estimate": "约 $0.200，预计 120000 ms",
       "approval_needed": false
     },
-    "status": "FAIL",
-    "notes": [
-      "candidates missing: ['dag_workflow', 'research_v2', 'tree_of_thoughts']",
-      "classifier_expected=true but classifier_used=false"
-    ],
+    "status": "PASS",
+    "notes": [],
     "classification_only_note": ""
   },
   {
-    "case_id": "classifier_no_clear_winner",
-    "name": "无 clear winner（classifier 必触发）",
-    "planned_mode": "reflection",
-    "executed_mode": "tree_of_thoughts",
+    "case_id": "swarm_multi_agent_team",
+    "name": "Swarm 多 Agent 团队",
+    "planned_mode": "dag_workflow",
+    "executed_mode": "direct_answer",
+    "classifier_used": true,
+    "classifier_reason": "semantic_complexity_conflict",
+    "reason_codes": [
+      "classifier_trigger_semantic_complexity_conflict",
+      "mode_dag_workflow"
+    ],
+    "provider": "deterministic_mock",
+    "model_used": "MiniMax-M2.7",
+    "mock": true,
+    "fallback_used": false,
+    "approval_required": true,
+    "async_required": false,
+    "risk_level": "high",
+    "addon_capabilities": [
+      "mcp_tools",
+      "workspace",
+      "audit",
+      "sandbox",
+      "approval"
+    ],
+    "disabled_capabilities": [],
+    "rejected_modes": [],
+    "candidates": [
+      {
+        "Mode": "dag_workflow",
+        "Score": 0.85,
+        "CostEstimate": 0.08,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "direct_answer",
+        "Score": 0.4,
+        "CostEstimate": 0.005,
+        "LatencyTier": "fast",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
+    "score_breakdown": {
+      "dag_workflow": 1
+    },
+    "frontend_explanation": {
+      "selected_mode_human": "DAG 多步工作流",
+      "why": "phase7j: kw dag_workflow; classifier_fallback=true",
+      "capability_summary": [
+        "MCP 工具调用",
+        "Workspace 存储",
+        "审计记录",
+        "沙箱执行",
+        "等待人工审批"
+      ],
+      "cost_estimate": "约 $0.080，预计 20000 ms",
+      "approval_needed": true
+    },
+    "status": "PASS",
+    "notes": [],
+    "classification_only_note": "swarm_workflow planning only; execution may fall back if feature off"
+  },
+  {
+    "case_id": "swarm_budget_degrade",
+    "name": "Swarm 预算降级",
+    "planned_mode": "rag_answer",
+    "executed_mode": "direct_answer",
     "classifier_used": false,
     "classifier_reason": "",
-    "reason_codes": [],
+    "reason_codes": [
+      "mode_rag_answer",
+      "rejected_dag_workflow:cost_exceeds_budget",
+      "rejected_react_tool:cost_exceeds_budget",
+      "rejected_reflection:cost_exceeds_budget",
+      "rejected_tree_of_thoughts:latency_exceeds_max",
+      "rejected_debate:cost_exceeds_budget",
+      "rejected_research_v2:latency_exceeds_max",
+      "rejected_swarm_workflow:latency_exceeds_max",
+      "rejected_sandbox_execution:cost_exceeds_budget"
+    ],
+    "provider": "",
+    "model_used": "small",
+    "mock": false,
+    "fallback_used": false,
+    "approval_required": false,
+    "async_required": false,
+    "risk_level": "medium",
+    "addon_capabilities": [
+      "rag",
+      "citations",
+      "workspace",
+      "audit"
+    ],
+    "disabled_capabilities": [],
+    "rejected_modes": [
+      {
+        "mode": "dag_workflow",
+        "reason": "cost_exceeds_budget"
+      },
+      {
+        "mode": "react_tool",
+        "reason": "cost_exceeds_budget"
+      },
+      {
+        "mode": "reflection",
+        "reason": "cost_exceeds_budget"
+      },
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "debate",
+        "reason": "cost_exceeds_budget"
+      },
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "sandbox_execution",
+        "reason": "cost_exceeds_budget"
+      },
+      {
+        "mode": "dag_workflow",
+        "reason": "cost_exceeds_budget"
+      },
+      {
+        "mode": "react_tool",
+        "reason": "cost_exceeds_budget"
+      },
+      {
+        "mode": "reflection",
+        "reason": "cost_exceeds_budget"
+      },
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "debate",
+        "reason": "cost_exceeds_budget"
+      },
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "sandbox_execution",
+        "reason": "cost_exceeds_budget"
+      }
+    ],
+    "candidates": [
+      {
+        "Mode": "dag_workflow",
+        "Score": 0.2541,
+        "CostEstimate": 0.08,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "cost_exceeds_budget",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "react_tool",
+        "Score": 0.19,
+        "CostEstimate": 0.03,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "cost_exceeds_budget",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "rag_answer",
+        "Score": 0.17,
+        "CostEstimate": 0.02,
+        "LatencyTier": "fast",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "rag",
+          "citations",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "direct_answer",
+        "Score": 0.06,
+        "CostEstimate": 0.005,
+        "LatencyTier": "fast",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "reflection",
+        "Score": 0.02,
+        "CostEstimate": 0.06,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "cost_exceeds_budget",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "tree_of_thoughts",
+        "Score": 0,
+        "CostEstimate": 0.18,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "latency_exceeds_max",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "debate",
+        "Score": 0,
+        "CostEstimate": 0.12,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "cost_exceeds_budget",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "research_v2",
+        "Score": 0,
+        "CostEstimate": 0.2,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "latency_exceeds_max",
+        "SuggestedAddons": [
+          "rag",
+          "citations",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "swarm_workflow",
+        "Score": 0,
+        "CostEstimate": 0.3,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "latency_exceeds_max",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "sandbox_execution",
+        "Score": 0,
+        "CostEstimate": 0.05,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "cost_exceeds_budget",
+        "SuggestedAddons": [
+          "sandbox",
+          "approval",
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
+    "score_breakdown": {
+      "dag_workflow": 0.2541,
+      "debate": 0,
+      "direct_answer": 0.06,
+      "rag_answer": 0.17,
+      "react_tool": 0.19,
+      "reflection": 0.02,
+      "research_v2": 0,
+      "sandbox_execution": 0,
+      "swarm_workflow": 0,
+      "tree_of_thoughts": 0
+    },
+    "frontend_explanation": {
+      "selected_mode_human": "知识库检索",
+      "why": "mode=rag_answer score=0.17",
+      "capability_summary": [
+        "本地知识库检索",
+        "引用支持",
+        "Workspace 存储",
+        "审计记录"
+      ],
+      "cost_estimate": "约 $0.020，预计 5000 ms",
+      "approval_needed": false
+    },
+    "status": "PASS",
+    "notes": [],
+    "classification_only_note": ""
+  },
+  {
+    "case_id": "sandbox_execute_code",
+    "name": "Sandbox 执行代码",
+    "planned_mode": "sandbox_execution",
+    "executed_mode": "sandbox_execution",
+    "classifier_used": true,
+    "classifier_reason": "C5",
+    "reason_codes": [
+      "classifier_trigger_C5",
+      "mode_sandbox_execution",
+      "rejected_tree_of_thoughts:latency_exceeds_max",
+      "rejected_research_v2:latency_exceeds_max",
+      "rejected_swarm_workflow:latency_exceeds_max"
+    ],
+    "provider": "deterministic_mock",
+    "model_used": "small(mock)",
+    "mock": true,
+    "fallback_used": false,
+    "approval_required": true,
+    "async_required": true,
+    "risk_level": "medium",
+    "addon_capabilities": [
+      "sandbox",
+      "approval",
+      "workspace",
+      "audit"
+    ],
+    "disabled_capabilities": [],
+    "rejected_modes": [
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      }
+    ],
+    "candidates": [
+      {
+        "Mode": "sandbox_execution",
+        "Score": 0.85,
+        "CostEstimate": 0.05,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "sandbox",
+          "approval",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "react_tool",
+        "Score": 0.4,
+        "CostEstimate": 0.03,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
+    "score_breakdown": {
+      "sandbox_execution": 1
+    },
+    "frontend_explanation": {
+      "selected_mode_human": "沙箱代码执行",
+      "why": "phase7j: kw sandbox_execution; classifier_fallback=true",
+      "capability_summary": [
+        "沙箱执行",
+        "等待人工审批",
+        "Workspace 存储",
+        "审计记录"
+      ],
+      "cost_estimate": "约 $0.050，预计 30000 ms",
+      "approval_needed": true
+    },
+    "status": "PASS",
+    "notes": [],
+    "classification_only_note": ""
+  },
+  {
+    "case_id": "sandbox_blocked_by_user",
+    "name": "Sandbox 用户禁用",
+    "planned_mode": "sandbox_execution",
+    "executed_mode": "direct_answer",
+    "classifier_used": false,
+    "classifier_reason": "",
+    "reason_codes": [
+      "mode_sandbox_execution",
+      "rejected_sandbox_execution:blocked_by_user_allow_flag",
+      "rejected_tree_of_thoughts:latency_exceeds_max",
+      "rejected_debate:latency_exceeds_max",
+      "rejected_research_v2:latency_exceeds_max",
+      "rejected_swarm_workflow:latency_exceeds_max"
+    ],
+    "provider": "",
+    "model_used": "small",
+    "mock": false,
+    "fallback_used": false,
+    "approval_required": true,
+    "async_required": true,
+    "risk_level": "high",
+    "addon_capabilities": [
+      "sandbox",
+      "approval",
+      "workspace",
+      "audit"
+    ],
+    "disabled_capabilities": [
+      "sandbox"
+    ],
+    "rejected_modes": [
+      {
+        "mode": "sandbox_execution",
+        "reason": "blocked_by_user_allow_flag"
+      },
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "debate",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      }
+    ],
+    "candidates": [
+      {
+        "Mode": "sandbox_execution",
+        "Score": 0.85,
+        "CostEstimate": 0.05,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "sandbox",
+          "approval",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "react_tool",
+        "Score": 0.4,
+        "CostEstimate": 0.03,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
+    "score_breakdown": {
+      "sandbox_execution": 1
+    },
+    "frontend_explanation": {
+      "selected_mode_human": "沙箱代码执行",
+      "why": "phase7j: kw sandbox_execution",
+      "capability_summary": [
+        "沙箱执行",
+        "等待人工审批",
+        "Workspace 存储",
+        "审计记录"
+      ],
+      "cost_estimate": "约 $0.050，预计 30000 ms",
+      "approval_needed": true
+    },
+    "status": "PASS",
+    "notes": [],
+    "classification_only_note": ""
+  },
+  {
+    "case_id": "sandbox_untrusted_code_risk",
+    "name": "Sandbox 不可信代码风险",
+    "planned_mode": "sandbox_execution",
+    "executed_mode": "sandbox_execution",
+    "classifier_used": true,
+    "classifier_reason": "C5",
+    "reason_codes": [
+      "classifier_trigger_C5",
+      "mode_sandbox_execution",
+      "rejected_tree_of_thoughts:latency_exceeds_max",
+      "rejected_research_v2:latency_exceeds_max",
+      "rejected_swarm_workflow:latency_exceeds_max"
+    ],
+    "provider": "deterministic_mock",
+    "model_used": "small(mock)",
+    "mock": true,
+    "fallback_used": false,
+    "approval_required": true,
+    "async_required": true,
+    "risk_level": "high",
+    "addon_capabilities": [
+      "sandbox",
+      "approval",
+      "workspace",
+      "audit"
+    ],
+    "disabled_capabilities": [],
+    "rejected_modes": [
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      }
+    ],
+    "candidates": [
+      {
+        "Mode": "sandbox_execution",
+        "Score": 0.85,
+        "CostEstimate": 0.05,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "sandbox",
+          "approval",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "react_tool",
+        "Score": 0.4,
+        "CostEstimate": 0.03,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
+    "score_breakdown": {
+      "sandbox_execution": 1
+    },
+    "frontend_explanation": {
+      "selected_mode_human": "沙箱代码执行",
+      "why": "phase7j: kw sandbox_execution; classifier_fallback=true",
+      "capability_summary": [
+        "沙箱执行",
+        "等待人工审批",
+        "Workspace 存储",
+        "审计记录"
+      ],
+      "cost_estimate": "约 $0.050，预计 30000 ms",
+      "approval_needed": true
+    },
+    "status": "PASS",
+    "notes": [],
+    "classification_only_note": ""
+  },
+  {
+    "case_id": "classifier_dag_vs_tot_vs_research",
+    "name": "3 个高级 mode 冲突",
+    "planned_mode": "tree_of_thoughts",
+    "executed_mode": "reflection",
+    "classifier_used": false,
+    "classifier_reason": "",
+    "reason_codes": [
+      "mode_tree_of_thoughts",
+      "rejected_research_v2:latency_exceeds_max",
+      "rejected_tree_of_thoughts:latency_exceeds_max",
+      "rejected_swarm_workflow:latency_exceeds_max"
+    ],
     "provider": "",
     "model_used": "medium",
     "mock": false,
@@ -987,29 +2496,157 @@
     "addon_capabilities": [
       "workspace",
       "audit",
-      "sandbox"
+      "citations"
     ],
     "disabled_capabilities": [],
-    "rejected_modes": [],
-    "candidates": [],
+    "rejected_modes": [
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      }
+    ],
+    "candidates": [
+      {
+        "Mode": "tree_of_thoughts",
+        "Score": 0.85,
+        "CostEstimate": 0.18,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "reflection",
+        "Score": 0.4,
+        "CostEstimate": 0.06,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
     "score_breakdown": {
       "tree_of_thoughts": 1
     },
     "frontend_explanation": {
       "selected_mode_human": "多路径探索",
-      "why": "complexity=0.55 risk=medium planned=reflection executed=tree_of_thoughts score=0.44",
+      "why": "phase7j: kw tree_of_thoughts",
+      "capability_summary": [
+        "Workspace 存储",
+        "审计记录",
+        "引用支持"
+      ],
+      "cost_estimate": "约 $0.180，预计 90000 ms",
+      "approval_needed": false
+    },
+    "status": "FAIL",
+    "notes": [
+      "candidates missing: ['dag_workflow', 'research_v2']",
+      "classifier_expected=true but classifier_used=false"
+    ],
+    "classification_only_note": ""
+  },
+  {
+    "case_id": "classifier_no_clear_winner",
+    "name": "无 clear winner（classifier 必触发）",
+    "planned_mode": "debate",
+    "executed_mode": "reflection",
+    "classifier_used": true,
+    "classifier_reason": "semantic_complexity_conflict",
+    "reason_codes": [
+      "classifier_trigger_semantic_complexity_conflict",
+      "mode_debate",
+      "rejected_tree_of_thoughts:latency_exceeds_max",
+      "rejected_research_v2:latency_exceeds_max",
+      "rejected_swarm_workflow:latency_exceeds_max"
+    ],
+    "provider": "deterministic_mock",
+    "model_used": "small(mock)",
+    "mock": true,
+    "fallback_used": false,
+    "approval_required": false,
+    "async_required": true,
+    "risk_level": "medium",
+    "addon_capabilities": [
+      "workspace",
+      "audit",
+      "sandbox"
+    ],
+    "disabled_capabilities": [],
+    "rejected_modes": [
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      }
+    ],
+    "candidates": [
+      {
+        "Mode": "debate",
+        "Score": 0.85,
+        "CostEstimate": 0.12,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "tree_of_thoughts",
+        "Score": 0.4,
+        "CostEstimate": 0.18,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
+    "score_breakdown": {
+      "debate": 1
+    },
+    "frontend_explanation": {
+      "selected_mode_human": "正反观点对比",
+      "why": "phase7j: kw debate; classifier_fallback=true",
       "capability_summary": [
         "Workspace 存储",
         "审计记录",
         "沙箱执行"
       ],
-      "cost_estimate": "约 $0.060，预计 30000 ms",
+      "cost_estimate": "约 $0.120，预计 60000 ms",
       "approval_needed": false
     },
-    "status": "FAIL",
-    "notes": [
-      "classifier_expected=true but classifier_used=false"
-    ],
+    "status": "PASS",
+    "notes": [],
     "classification_only_note": ""
   },
   {
@@ -1019,7 +2656,15 @@
     "executed_mode": "direct_answer",
     "classifier_used": false,
     "classifier_reason": "",
-    "reason_codes": [],
+    "reason_codes": [
+      "mode_direct_answer",
+      "rejected_research_v2:latency_exceeds_max",
+      "rejected_reflection:cost_exceeds_budget",
+      "rejected_tree_of_thoughts:latency_exceeds_max",
+      "rejected_debate:latency_exceeds_max",
+      "rejected_dag_workflow:cost_exceeds_budget",
+      "rejected_swarm_workflow:latency_exceeds_max"
+    ],
     "provider": "",
     "model_used": "small",
     "mock": false,
@@ -1032,14 +2677,211 @@
       "audit"
     ],
     "disabled_capabilities": [],
-    "rejected_modes": [],
-    "candidates": [],
+    "rejected_modes": [
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "reflection",
+        "reason": "cost_exceeds_budget"
+      },
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "debate",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "dag_workflow",
+        "reason": "cost_exceeds_budget"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "reflection",
+        "reason": "cost_exceeds_budget"
+      },
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "debate",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "dag_workflow",
+        "reason": "cost_exceeds_budget"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      }
+    ],
+    "candidates": [
+      {
+        "Mode": "direct_answer",
+        "Score": 0.49,
+        "CostEstimate": 0.005,
+        "LatencyTier": "fast",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "rag_answer",
+        "Score": 0.05,
+        "CostEstimate": 0.02,
+        "LatencyTier": "fast",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "rag",
+          "citations",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "react_tool",
+        "Score": 0.03,
+        "CostEstimate": 0.03,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "research_v2",
+        "Score": 0,
+        "CostEstimate": 0.2,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "latency_exceeds_max",
+        "SuggestedAddons": [
+          "rag",
+          "citations",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "reflection",
+        "Score": 0,
+        "CostEstimate": 0.06,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "cost_exceeds_budget",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "tree_of_thoughts",
+        "Score": 0,
+        "CostEstimate": 0.18,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "latency_exceeds_max",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "debate",
+        "Score": 0,
+        "CostEstimate": 0.12,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "latency_exceeds_max",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "dag_workflow",
+        "Score": 0,
+        "CostEstimate": 0.08,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "cost_exceeds_budget",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "swarm_workflow",
+        "Score": 0,
+        "CostEstimate": 0.3,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "latency_exceeds_max",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "sandbox_execution",
+        "Score": 0,
+        "CostEstimate": 0.05,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "sandbox",
+          "approval",
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
     "score_breakdown": {
-      "direct_answer": 1
+      "dag_workflow": 0,
+      "debate": 0,
+      "direct_answer": 0.49,
+      "rag_answer": 0.05,
+      "react_tool": 0.03,
+      "reflection": 0,
+      "research_v2": 0,
+      "sandbox_execution": 0,
+      "swarm_workflow": 0,
+      "tree_of_thoughts": 0
     },
     "frontend_explanation": {
       "selected_mode_human": "直接回答",
-      "why": "complexity=0.05 risk=low planned=direct_answer executed=direct_answer score=0.37",
+      "why": "fallback: all candidates rejected",
       "capability_summary": [
         "Workspace 存储",
         "审计记录"
@@ -1054,38 +2896,219 @@
   {
     "case_id": "frontend_contract_full_payload",
     "name": "前端 contract 完整样本",
-    "planned_mode": "reflection",
-    "executed_mode": "tree_of_thoughts",
-    "classifier_used": false,
-    "classifier_reason": "",
-    "reason_codes": [],
-    "provider": "",
-    "model_used": "medium",
-    "mock": false,
+    "planned_mode": "dag_workflow",
+    "executed_mode": "direct_answer",
+    "classifier_used": true,
+    "classifier_reason": "C5",
+    "reason_codes": [
+      "classifier_trigger_C5",
+      "mode_dag_workflow",
+      "rejected_tree_of_thoughts:latency_exceeds_max",
+      "rejected_research_v2:latency_exceeds_max",
+      "rejected_swarm_workflow:latency_exceeds_max"
+    ],
+    "provider": "deterministic_mock",
+    "model_used": "small(mock)",
+    "mock": true,
     "fallback_used": false,
     "approval_required": false,
-    "async_required": true,
+    "async_required": false,
     "risk_level": "medium",
     "addon_capabilities": [
+      "mcp_tools",
       "workspace",
       "audit",
       "sandbox"
     ],
     "disabled_capabilities": [],
-    "rejected_modes": [],
-    "candidates": [],
+    "rejected_modes": [
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "tree_of_thoughts",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "research_v2",
+        "reason": "latency_exceeds_max"
+      },
+      {
+        "mode": "swarm_workflow",
+        "reason": "latency_exceeds_max"
+      }
+    ],
+    "candidates": [
+      {
+        "Mode": "dag_workflow",
+        "Score": 0.5874999999999999,
+        "CostEstimate": 0.08,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "sandbox_execution",
+        "Score": 0.46,
+        "CostEstimate": 0.05,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "sandbox",
+          "approval",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "react_tool",
+        "Score": 0.38,
+        "CostEstimate": 0.03,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "mcp_tools",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "reflection",
+        "Score": 0.36,
+        "CostEstimate": 0.06,
+        "LatencyTier": "medium",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "tree_of_thoughts",
+        "Score": 0.31,
+        "CostEstimate": 0.18,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "latency_exceeds_max",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "rag_answer",
+        "Score": 0.3,
+        "CostEstimate": 0.02,
+        "LatencyTier": "fast",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "rag",
+          "citations",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "debate",
+        "Score": 0.23,
+        "CostEstimate": 0.12,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "research_v2",
+        "Score": 0.16,
+        "CostEstimate": 0.2,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "latency_exceeds_max",
+        "SuggestedAddons": [
+          "rag",
+          "citations",
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "swarm_workflow",
+        "Score": 0.12,
+        "CostEstimate": 0.3,
+        "LatencyTier": "slow",
+        "SignalsHit": null,
+        "Rejected": true,
+        "RejectReason": "latency_exceeds_max",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      },
+      {
+        "Mode": "direct_answer",
+        "Score": 0,
+        "CostEstimate": 0.005,
+        "LatencyTier": "fast",
+        "SignalsHit": null,
+        "Rejected": false,
+        "RejectReason": "",
+        "SuggestedAddons": [
+          "workspace",
+          "audit"
+        ]
+      }
+    ],
     "score_breakdown": {
-      "tree_of_thoughts": 1
+      "dag_workflow": 0.5874999999999999,
+      "debate": 0.23,
+      "direct_answer": 0,
+      "rag_answer": 0.3,
+      "react_tool": 0.38,
+      "reflection": 0.36,
+      "research_v2": 0.16,
+      "sandbox_execution": 0.46,
+      "swarm_workflow": 0.12,
+      "tree_of_thoughts": 0.31
     },
     "frontend_explanation": {
-      "selected_mode_human": "多路径探索",
-      "why": "complexity=0.55 risk=medium planned=reflection executed=tree_of_thoughts score=0.44",
+      "selected_mode_human": "DAG 多步工作流",
+      "why": "mode=dag_workflow score=0.59; classifier_fallback=true",
       "capability_summary": [
+        "MCP 工具调用",
         "Workspace 存储",
         "审计记录",
         "沙箱执行"
       ],
-      "cost_estimate": "约 $0.060，预计 30000 ms",
+      "cost_estimate": "约 $0.080，预计 20000 ms",
       "approval_needed": false
     },
     "status": "PASS",

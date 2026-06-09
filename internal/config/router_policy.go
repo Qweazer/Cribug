@@ -316,7 +316,7 @@ func DefaultRouterPolicyV2() *RouterPolicyV2 {
 			"direct_answer":     {},
 		},
 		DisabledBehavior: map[string]PolicyDisabled{
-			"sandbox_execution":  {WhenDisabled: "mode_disabled", WhenUserBlocks: "mode_disabled"},
+			"sandbox_execution":  {WhenDisabled: "mode_disabled", WhenUserBlocks: "direct_answer"},
 			"research_v2":       {WhenDisabled: "research_v1", WhenUserBlocks: "direct_answer"},
 			"tree_of_thoughts":  {WhenDisabled: "reflection", WhenUserBlocks: "direct_answer"},
 			"debate":            {WhenDisabled: "reflection", WhenUserBlocks: "direct_answer"},

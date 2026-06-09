@@ -65,6 +65,16 @@ type ClassifyTaskComplexityResult struct {
 func (ra *RouterActivities) ClassifyTaskComplexity(ctx context.Context, input ClassifyTaskComplexityInput) (*ClassifyTaskComplexityResult, error) {
 	score := classifyHeuristic(input.Query, input.UserIntent)
 	risk := riskFromScore(score)
+	// Phase 7I P1: sandbox / untrusted-code risk override. Queries
+	// asking us to execute unknown / untrusted scripts are intrinsically
+	// high-risk even when complexity is low — the safety budget
+	// matters more than the question length. Promote to "high" so
+	// downstream approval gates (and frontend risk_level) reflect it.
+	if hasUntrustedCodeRisk(input.Query) {
+		if risk != "critical" {
+			risk = "high"
+		}
+	}
 	// Tag the summary with keyword-flags so the policy evaluator
 	// (which only sees the summary, not the raw query) can make
 	// mode decisions like "route to debate" without re-running the
@@ -80,6 +90,25 @@ func (ra *RouterActivities) ClassifyTaskComplexity(ctx context.Context, input Cl
 		Summary:         summary,
 		TokensUsed:      0, // heuristic uses 0 tokens
 	}, nil
+}
+
+// hasUntrustedCodeRisk returns true if the query mentions running
+// unknown / untrusted code or destructive shell operations.
+// Used by ClassifyTaskComplexity to bump risk to "high" regardless
+// of complexity, so downstream approval gates see the right level.
+func hasUntrustedCodeRisk(query string) bool {
+	lower := strings.ToLower(query)
+	keywords := []string{
+		"未知脚本", "未知来源", "不可信", "未验证", "untrusted",
+		"unknown script", "unknown source", "未知代码",
+		"rm -rf", "sudo ", "curl | sh", "curl|sh", "wget | sh",
+	}
+	for _, kw := range keywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
 }
 
 // classifierKeywordFlags returns a space-separated list of mode-tag
@@ -259,21 +288,38 @@ func (ra *RouterActivities) DetectTaskCapabilities(ctx context.Context, input De
 		result.DetectedTools = input.AvailableTools
 	}
 
-	// Sandbox
+	// Sandbox — Phase 7I P1: tightened to EXPLICIT execution intent.
+	// Mentions of "Sandbox" / "沙箱" as architectural concepts no longer
+	// flip RequiresSandbox. Only phrases like "execute in sandbox",
+	// "run code", "运行代码", "未知脚本" trigger execution routing.
 	sandboxKeywords := []string{
-		"运行代码", "执行脚本", "沙箱", "sandbox", "编译", "wasi",
-		"execute", "run", "python", "code", "脚本",
-		// Phase 7I Fix-4: extended risk keywords. Any of these implies
-		// "the user is about to run untrusted / unknown code" and
-		// must trigger sandbox_execution + approval.
+		"运行代码", "执行脚本", "运行脚本", "执行代码", "编译运行",
 		"未知脚本", "不可信代码", "未知来源", "未验证", "untrusted", "unknown script",
 		"读写文件", "临时文件", "临时目录", "read file", "write file",
 		"shell", "bash", "python code", "execute code",
+		"execute in sandbox", "run in sandbox", "execute this script",
 	}
 	for _, kw := range sandboxKeywords {
 		if strings.Contains(lower, strings.ToLower(kw)) {
 			result.RequiresSandbox = true
 			break
+		}
+	}
+	// Catch "sandbox" with execution verbs around it (e.g. "在sandbox中执行").
+	if !result.RequiresSandbox {
+		execVerbs := []string{"运行", "执行", "run", "execute", "exec"}
+		sandboxMentions := []string{"sandbox", "沙箱"}
+		for _, v := range execVerbs {
+			for _, s := range sandboxMentions {
+				phrase := strings.ToLower(v + s)
+				if strings.Contains(lower, phrase) || strings.Contains(lower, s+"中"+v) {
+					result.RequiresSandbox = true
+					break
+				}
+			}
+			if result.RequiresSandbox {
+				break
+			}
 		}
 	}
 
@@ -311,6 +357,11 @@ type EvaluateRoutingPolicyInput struct {
 	AllowSandbox     bool                       `json:"allow_sandbox"`
 	AllowResearch    bool                       `json:"allow_research"`
 	BudgetUSD        float64                    `json:"budget_usd"`
+	// Phase 7I P1: max_latency_ms plumbed end-to-end so v2
+	// signals.MaxLatencyMs reflects the user's stated ceiling and
+	// latency_exceeds_max rejection is computed against the real
+	// value (not the hardcoded 30000 default).
+	MaxLatencyMs     int                        `json:"max_latency_ms"`
 	RouterConfig     types.RouterConfigSnapshot `json:"router_config"`
 	// Phase 7I: Query + UserIntent are passed through to the signal
 	// builder so scoring has the exact text to keyword-match.
@@ -339,6 +390,22 @@ func (ra *RouterActivities) EvaluateRoutingPolicy(ctx context.Context, input Eva
 		NeedsRAG:      input.RequiresRAG,
 		NeedsSandbox:  input.RequiresSandbox,
 		NeedsResearch: input.RequiresResearch,
+	}
+	// Phase 7I P1: user-block flags override capability detection.
+	// If the user explicitly disabled a capability, treat that
+	// capability as not-needed regardless of what the heuristic
+	// detected from keywords. This makes the smoke expectation
+	// (allow_research=false → executed_mode ∈ {direct_answer,
+	// rag_answer}) hold even when the query text contains research
+	// keywords.
+	if !input.AllowSandbox {
+		caps.NeedsSandbox = false
+	}
+	if !input.AllowResearch {
+		caps.NeedsResearch = false
+	}
+	if !input.AllowTools {
+		caps.NeedsTools = false
 	}
 	executed, fallbackReason := resolveExecutedMode(planned, cfg, caps)
 
@@ -402,6 +469,31 @@ func (ra *RouterActivities) EvaluateRoutingPolicy(ctx context.Context, input Eva
 		V2PolicyVersion:           expl.PolicyVersion,
 	}
 
+	// Phase 7I P1: surface budget / latency rejection reasons for ALL
+	// candidate modes so the frontend contract shows
+	// "cost_exceeds_budget" / "latency_exceeds_max" entries. The v2
+	// ScoreModes path already flags each candidate with RejectReason;
+	// here we lift those flags into explanation.RejectedModes so the
+	// frontend contract can iterate them uniformly.
+	for _, c := range expl.Candidates {
+		if c.Rejected && c.RejectReason != "" {
+			// Avoid double-adding the same (mode, reason) pair.
+			dup := false
+			for _, existing := range expl.RejectedModes {
+				if existing.Mode == c.Mode && existing.Reason == c.RejectReason {
+					dup = true
+					break
+				}
+			}
+			if !dup {
+				expl.RejectedModes = append(expl.RejectedModes, types.RejectedMode{
+					Mode:   c.Mode,
+					Reason: c.RejectReason,
+				})
+			}
+		}
+	}
+
 	// ── P0 SAFETY STEP: sandbox_execution MUST require approval ────
 	// Phase 7I P0: explicit safety guarantee, not bypassable.
 	// - sandbox mode selected → approval_required = true
@@ -415,6 +507,23 @@ func (ra *RouterActivities) EvaluateRoutingPolicy(ctx context.Context, input Eva
 		decision.FallbackReason = "p0_safety: sandbox_disallowed_by_user"
 		decision.RequiresApproval = false
 		decision.Reason += "; p0_safety: allow_sandbox=false forced fall back to direct_answer"
+		// Phase 7I P1: surface the sandbox_rejection in
+		// explanation.RejectedModes so the frontend contract shows
+		// "why was sandbox rejected" (smoke expects
+		// blocked_by_user_allow_flag in rejected_modes.reason).
+		expl.RejectedModes = append(expl.RejectedModes, types.RejectedMode{
+			Mode:   types.RouteSandboxExecution,
+			Reason: types.RejectBlockedByAllow,
+		})
+	}
+	// Phase 7I P1: when allow_research=false and we routed to
+	// research_v2, surface the rejection in RejectedModes so the
+	// frontend can show "why was research_v2 ruled out".
+	if !input.AllowResearch && planned == types.RouteResearchV2 && decision.Mode != types.RouteResearchV2 {
+		expl.RejectedModes = append(expl.RejectedModes, types.RejectedMode{
+			Mode:   types.RouteResearchV2,
+			Reason: types.RejectBlockedByAllow,
+		})
 	}
 
 	return &EvaluateRoutingPolicyResult{Decision: decision, Explanation: &expl, Signals: &expl.Signals}, nil
@@ -566,6 +675,13 @@ func resolveExecutedMode(planned types.RoutingMode, cfg types.RouterConfigSnapsh
 			return resolveDisabledFallback(planned, "debate", "enable_debate=false", false, caps)
 		}
 	case types.RouteResearchV2:
+		// Phase 7I P1: when the user explicitly blocks research,
+		// route research_v2 down to direct_answer (smoke expects
+		// direct_answer or rag_answer, never research_v1) regardless
+		// of whether research_v2 is enabled in config.
+		if !caps.NeedsResearch {
+			return resolveDisabledFallback(planned, "research_v2", "allow_research=false", true, caps)
+		}
 		if !cfg.EnableResearchV2 {
 			return resolveDisabledFallback(planned, "research_v2", "research_v2_not_enabled_fallback_to_research_v1", false, caps)
 		}
@@ -587,6 +703,15 @@ func resolveExecutedMode(planned types.RoutingMode, cfg types.RouterConfigSnapsh
 	case types.RouteRAGAnswer:
 		if !caps.NeedsRAG {
 			return resolveDisabledFallback(planned, "rag_answer", "allow_rag=false", true, caps)
+		}
+	case types.RouteResearchV2:
+		// Phase 7I P1: when allow_research=false, route research_v2
+		// down to direct_answer so the smoke expectation
+		// (executed_mode ∈ {direct_answer, rag_answer}) is satisfied.
+		// The previous default (research_v1) only applied when v2 was
+		// disabled by config; user-block is a stronger signal.
+		if !caps.NeedsResearch {
+			return resolveDisabledFallback(planned, "research_v2", "allow_research=false", true, caps)
 		}
 	}
 	return planned, ""

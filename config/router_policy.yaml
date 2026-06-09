@@ -183,7 +183,7 @@ fallback_order:
 disabled_behavior:
   sandbox_execution:
     when_disabled:    mode_disabled
-    when_user_blocks: mode_disabled
+    when_user_blocks: direct_answer
   research_v2:
     when_disabled:    research_v1
     when_user_blocks: direct_answer

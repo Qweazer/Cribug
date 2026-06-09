@@ -91,6 +91,7 @@ func AdvancedRoutingWorkflow(ctx workflow.Context, input types.RouteRequest) (*t
 			AllowSandbox:     input.AllowSandbox,
 			AllowResearch:    input.AllowResearch,
 			BudgetUSD:        input.BudgetUSD,
+			MaxLatencyMs:     input.MaxLatencyMs,
 			RouterConfig:     input.RouterConfig,
 			Query:            input.Query,
 			UserIntent:       input.UserIntent,
