@@ -225,8 +225,18 @@ type FrontendRouterContract struct {
 	RejectedModes          []RejectedMode     `json:"rejected_modes"`
 	ScoreBreakdown         map[string]float64 `json:"score_breakdown"`
 	PolicyVersion          string             `json:"policy_version"`
-	ClassifierUsed         bool               `json:"classifier_used"`
-	FrontendExplanation    *FrontendExplanation `json:"frontend_explanation,omitempty"`
+	ClassifierUsed bool `json:"classifier_used"`
+	// Phase7I P0B: classifier metadata plumbing. Populated from
+	// explanation.ClassifierMetadata so the frontend can see *why*
+	// the classifier was invoked (ClassifierReason), what it produced
+	// (ClassifierConfidence), and whether the call hit a real provider
+	// or fell back to mock (FallbackUsed / Provider / ModelUsedHint /
+	// Mock).
+	ClassifierReason string `json:"classifier_reason,omitempty"`
+	ClassifierConfidence float64 `json:"classifier_confidence,omitempty"`
+	Mock bool `json:"mock,omitempty"`
+	FallbackUsed bool `json:"fallback_used,omitempty"`
+	FrontendExplanation *FrontendExplanation `json:"frontend_explanation,omitempty"`
 }
 
 // ─── driver.Valuer for JSONB columns ──────────────────────────────────

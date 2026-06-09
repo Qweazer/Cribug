@@ -959,6 +959,38 @@ func BuildFrontendContract(decision types.RoutingDecision, explanation *types.Ro
 		}
 		contract.SelectedMode = explanation.SelectedMode
 		contract.ClassifierUsed = explanation.Signals.ClassifierUsed
+		// Phase7I P0B: surface classifier metadata so the frontend can
+		// see WHY the classifier was invoked (TriggerReason), WHAT it
+		// produced (Reasoning / Confidence), and WHETHER the call hit a
+		// real provider or fell back to mock (Fallback / Model / Provider).
+		// ClassifierAuditFields is non-nil only when the classifier path
+		// actually ran (applyClassifier in router_v2.go populates it).
+		if cm := explanation.ClassifierMetadata; cm != nil {
+			if cm.TriggerReason != "" {
+				contract.ClassifierReason = cm.TriggerReason
+			}
+			if cm.Confidence >0 {
+				contract.ClassifierConfidence = cm.Confidence
+			}
+			contract.Mock = cm.Fallback
+			contract.FallbackUsed = cm.Fallback
+			if cm.ModelUsed != "" {
+				contract.ModelUsedHint = cm.ModelUsed
+			}
+			// Provider name is not tracked in ClassifierAuditFields yet;
+			// surface a hint from ModelTier / fallback so the frontend
+			// can at least distinguish "real LLM" vs "deterministic mock".
+			if contract.Provider == "" {
+				if cm.Fallback {
+					contract.Provider = "deterministic_mock"
+				} else if cm.ModelUsed != "" {
+					contract.Provider = "openai_compatible"
+				}
+			}
+			if cm.TriggerReason != "" {
+				contract.ReasonCodes = append(contract.ReasonCodes, "classifier_trigger_"+cm.TriggerReason)
+			}
+		}
 		// Human-readable summary
 		contract.FrontendExplanation = buildFrontendExplanation(explanation, decision)
 		if explanation.SelectedMode != "" {
