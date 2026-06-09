@@ -369,12 +369,15 @@ func scoreOneMode(mode types.RoutingMode, s types.RouterDecisionSignals, p *conf
 			c.Rejected = true
 			c.RejectReason = types.RejectUserFlagDisabled
 		}
-	case types.RouteReActTool, types.RouteDAGWorkflow:
+	case types.RouteReActTool:
 		if s.RequiresTools && !s.AllowTools {
 			c.Rejected = true
 			c.RejectReason = types.RejectUserFlagDisabled
 		}
-	}
+	case types.RouteDAGWorkflow:
+		// P1B: DAG is internal orchestration, not external tool.
+		// allow_tools=false blocks only MCP/custom tools.
+}
 
 	return c
 }
@@ -545,26 +548,38 @@ func isAsyncRequired(mode types.RoutingMode) bool {
 // the classifier is disabled (the default), the ctx is unused and the
 // heuristic path is purely deterministic.
 func selectPlannedModeV2(ctx context.Context, input EvaluateRoutingPolicyInput) (types.RoutingMode, types.RouterDecisionExplanation) {
-	// ── Phase 7J: Keyword short-circuit (override V2 scoring) ──
+	// ── Phase7J+P1B: Keyword short-circuit (override V2 scoring) ──
+	// P1B: each keyword group maps to a specific advanced mode
+	// rather than all routing to dag_workflow.
 	{
 		summary := strings.ToLower(input.ComplexitySummary)
 		query := strings.ToLower(input.Query)
-		dagKeywords := []string{
-			"比较", "对比", "vs", "推荐", "挑选",
-			"分析", "拆解", "分解", "规划", "策划",
-			"列出", "列举", "步骤", "流程", "方案",
-			"设计", "架构", "选型", "评估",
-			"compare", "analyze", "plan", "list", "steps",
-			"design", "architect", "evaluate", "recommend",
+		// Debate: comparison / vs / trade-offs keywords
+		debateKeywords := []string{"vs", "compare", "versus", "trade-off", "tradeoff", "pros and cons"}
+		for _, kw := range debateKeywords {
+			if strings.Contains(summary, kw) || strings.Contains(query, kw) {
+				return types.RouteDebate, types.RouterDecisionExplanation{SelectedMode: types.RouteDebate, SelectedReason: "phase7j: kw debate (" + kw + ")", PolicyVersion: "phase7j", AuditRequired: true}
+			}
 		}
+		// Reflection: improve / revise / polish / critique
+		reflectionKeywords := []string{"improve", "revise", "polish", "critique", "refine", "draft", "essay"}
+		for _, kw := range reflectionKeywords {
+			if strings.Contains(summary, kw) || strings.Contains(query, kw) {
+				return types.RouteReflection, types.RouterDecisionExplanation{SelectedMode: types.RouteReflection, SelectedReason: "phase7j: kw reflection (" + kw + ")", PolicyVersion: "phase7j", AuditRequired: true}
+			}
+		}
+		// Tree-of-Thoughts: explore / branch / multi-path
+		totKeywords := []string{"explore", "multiple path", "branch", "branches", "alternative"}
+		for _, kw := range totKeywords {
+			if strings.Contains(summary, kw) || strings.Contains(query, kw) {
+				return types.RouteTreeOfThoughts, types.RouterDecisionExplanation{SelectedMode: types.RouteTreeOfThoughts, SelectedReason: "phase7j: kw tot (" + kw + ")", PolicyVersion: "phase7j", AuditRequired: true}
+			}
+		}
+		// DAG: structured multi-step / plan / list keywords
+		dagKeywords := []string{"step", "steps", "list", "plan", "design", "architect", "evaluate"}
 		for _, kw := range dagKeywords {
 			if strings.Contains(summary, kw) || strings.Contains(query, kw) {
-							return types.RouteDAGWorkflow, types.RouterDecisionExplanation{
-					SelectedMode:   types.RouteDAGWorkflow,
-					SelectedReason: "phase7j: keyword short-circuit (" + kw + ")",
-					PolicyVersion:  "phase7j",
-					AuditRequired:  true,
-				}
+				return types.RouteDAGWorkflow, types.RouterDecisionExplanation{SelectedMode: types.RouteDAGWorkflow, SelectedReason: "phase7j: kw dag (" + kw + ")", PolicyVersion: "phase7j", AuditRequired: true}
 			}
 		}
 	}

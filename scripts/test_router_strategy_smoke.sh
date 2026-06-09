@@ -155,13 +155,13 @@ else
 fi
 
 # ─── Test 12: allow_tools=false → no react_tool/dag ──────────────────
-echo "--- Test 12: allow_tools=false → no react_tool/dag ---"
+echo "--- Test 12: allow_tools=false → no react_tool (dag OK per P1B) ---"
 RESP=$(api POST "/api/v1/tasks/route" '{"query": "Calculate 42*17 for me with the calculator", "allow_tools": false, "budget_usd": 0.3}')
 MODE=$(echo "$RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('decision',{}).get('mode',''))" 2>/dev/null || echo "")
-if [ "$MODE" != "react_tool" ] && [ "$MODE" != "dag_workflow" ]; then
-    log_pass "T12: allow_tools=false → mode=$MODE"
+if [ "$MODE" != "react_tool" ]; then  # P1B: dag_workflow is not blocked by allow_tools
+    log_pass "T12: allow_tools=false → mode=$MODE (not react_tool)"
 else
-    log_fail "T12: allow_tools=false but mode=$MODE"
+    log_fail "T12: allow_tools=false blocked react_tool but got mode=$MODE"
 fi
 
 # ─── Test 13: require_citations forces citations addon ────────────────
