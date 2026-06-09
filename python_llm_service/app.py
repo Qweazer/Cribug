@@ -96,6 +96,42 @@ def health():
         "model": os.environ.get("LLM_MODEL", "(from env)"),
     }
 
+# ── OpenAI-compatible /v1/chat/completions (P0 real LLM classifier) ──
+
+class OpenAIMessage(BaseModel):
+    role: str
+    content: str
+
+class OpenAICompletionRequest(BaseModel):
+    model: str = "gpt-4o-mini"
+    messages: list[OpenAIMessage]
+    max_tokens: int = 1024
+    temperature: float = 0.7
+
+@app.post("/v1/chat/completions")
+def openai_chat_completions(req: OpenAICompletionRequest):
+    internal = LLMRequest(
+        trace_id="classifier",
+        task_id="classifier",
+        provider="openai_compatible",
+        model=req.model,
+        messages=[LLMMessage(role=m.role, content=m.content) for m in req.messages],
+        temperature=req.temperature,
+        max_completion_tokens=req.max_tokens,
+        require_real=True,
+        allow_mock_fallback=False,
+    )
+    resp = chat(internal)
+    return {
+        "choices": [{"message": {"role": "assistant", "content": resp.content}}],
+        "model": resp.model,
+        "usage": {
+            "prompt_tokens": resp.usage.prompt_tokens,
+            "completion_tokens": resp.usage.completion_tokens,
+            "total_tokens": resp.usage.total_tokens,
+        },
+    }
+
 @app.post("/tokenize")
 def tokenize(req: TokenizeRequest):
     try:
