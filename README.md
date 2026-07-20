@@ -1,4 +1,4 @@
-# Cribug - Multi-Agent LLM Orchestration MVP
+# Cribug - Multi-Agent LLM Orchestration
 
 An intelligent agent orchestrating LLM calls with Temporal workflows.
 
