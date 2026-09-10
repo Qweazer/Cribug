@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="320" viewBox="0 0 960 320" role="img" aria-labelledby="title desc">
+  <title id="title">Cribug — Reliable agents. Real work.</title>
+  <desc id="desc">A connected agent symbol and the Cribug wordmark on a rounded midnight-blue background with rose accents.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="960" y2="320" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#101022" />
+      <stop offset="1" stop-color="#191322" />
+    </linearGradient>
+    <linearGradient id="accent" x1="116" y1="100" x2="260" y2="224" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff665c" />
+      <stop offset="1" stop-color="#ff167d" />
+    </linearGradient>
+  </defs>
+
+  <rect x="1" y="1" width="958" height="318" rx="40" fill="url(#background)" stroke="#2b2538" stroke-width="2" />
+
+  <g transform="translate(80 0)">
+  <!-- A C-shaped constellation: one coordinator, connected agents. -->
+  <g fill="none" stroke="#514052" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M237 114 180 92 123 126 123 194 180 228 237 206" />
+    <path d="m180 160 57-46m-57 46-57-34m57 34-57 34m57-34 57 46m-57-46V92m0 68v68" />
+  </g>
+  <path d="m225 108-45-16-57 34v68l57 34 45-16" fill="none" stroke="url(#accent)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" />
+  <g fill="#f5edf7">
+    <circle cx="237" cy="114" r="8" />
+    <circle cx="180" cy="92" r="8" />
+    <circle cx="123" cy="126" r="8" />
+    <circle cx="123" cy="194" r="8" />
+    <circle cx="180" cy="228" r="8" />
+    <circle cx="237" cy="206" r="8" />
+  </g>
+  <rect x="160" y="140" width="40" height="40" rx="12" fill="url(#accent)" />
+  <rect x="174" y="154" width="12" height="12" rx="4" fill="#fff" />
+
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+    <text x="321" y="170" font-size="86" font-weight="750" letter-spacing="-4" fill="#f9f8fc">cri<tspan fill="#ff477e">bug</tspan></text>
+    <text x="326" y="219" font-size="25" font-weight="400" letter-spacing="0.3" fill="#aba5ba">Reliable agents. Real work.</text>
+  </g>
+  </g>
+</svg>

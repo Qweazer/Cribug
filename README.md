@@ -1,6 +1,20 @@
-# Cribug
+<p align="center">
+  <img src="docs/images/cribug-banner.svg" alt="Cribug — Reliable agents. Real work." width="720" />
+</p>
+
+# Cribug — Reliable Agents. Real Work.
+
+> [快速开始](#本地启动) · [核心能力](#关键能力) · [架构总览](#架构总览) · [API 参考](#api-速览) · [开发约定](#开发约定)
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-f5c26b?style=flat&labelColor=242435)](#license)
+[![Go](https://img.shields.io/badge/Go-Orchestration-65cbe3?style=flat&labelColor=242435)](go.mod)
+[![Python](https://img.shields.io/badge/Python-LLM%20Service-7c9cff?style=flat&labelColor=242435)](python_llm_service/requirements.txt)
+[![Rust](https://img.shields.io/badge/Rust-Sandbox-f39b73?style=flat&labelColor=242435)](sandbox/runner/Cargo.toml)
+[![Contributions Welcome](https://img.shields.io/badge/Contributions-welcome-ff477e?style=flat&labelColor=242435)](#开发约定)
 
 **Cribug** 是一个基于 [Temporal](https://temporal.io/) 的多 Agent LLM 编排平台。它把多模型推理、知识检索、工具调用、沙箱执行、Agent 间通信和人机协同审批等能力,统一封装成可观测、可恢复、可治理的工作流,对外提供一致的 REST/SSE API。
+
+**[开始使用 →](#本地启动)** &nbsp; · &nbsp; [了解架构](#架构总览) &nbsp; · &nbsp; [查看 API](#api-速览)
 
 ---
 
